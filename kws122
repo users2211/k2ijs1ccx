@@ -1,12 +1,12 @@
 getgenv().Config = {
     ["EquipEnchants"] = {"Coins", "Diamonds", "Treasure Hunter", "Strong Pets", "Tap Power"},
     ["KickWhenReachGoal"] = {
-        ["Rank"] = 20,
+        ["Rank"] = 35,
         ["Rebirth"] = 9,
         ["Area"] = 234
     },
     ["StopAt"] = {
-        ["Rank"] = 20, 
+        ["Rank"] = 35, 
         ["Area"] = 234
     },
     

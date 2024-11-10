@@ -1,8 +1,19 @@
 script_key="fXFDzisGdhJIkApNfmXCQTKTssYYfiBf";
-_G.GDO_LINE_FOR_HUGE = true
-_G.GGFX_MODE = 1  -- or 1 for no visuals
-_G.GZONE_TO = 999 -- to access the instance from W3, 99 to access it from W1
-_G.GWEBHOOK_USERID = "https://discord.com/api/webhooks/1272856891986542676/Mg2SOBlz0VSrcfYkEYiH5ig8tzRiEwGsJlB82vXKbuL8WZP5fOiLEnQMX7jiUwmxiWhC" -- your discord userID, not your name. numerical id.
-_G.GWEBHOOK_LINK = "601370367629590532" -- a webhook URL from your private discord channel.
-_G.GMAIL_RECEIVERS = {"OverPrecision"}  --can add or remove 
+-- Please Read FAQ channel for more info! Make sure you understand these parameters
+-- If not sure ask info in channel
+_G.GPROGRESS_MODE = "Hybrid"
+_G.GGFX_MODE = 2  --1 = REMOVE_TEXTURES : more stable! but no visuals
+_G.GRANK_TO = 99
+_G.GZONE_TO = 999 -- PLEASE READ FAQ about this property!!! it's important to understand.
+_G.GMAX_EGG_SLOTS = 90
+_G.GMAX_EQUIP_SLOTS = 90
+_G.GHOLD_GIFTS = false
+_G.GHOLD_BUNDLES = false
+_G.GMAX_ZONE_UPGRADE_COST = 2000000
+_G.GPOTIONS = {"Damage","Coins"}
+_G.GPOTIONS_MAX_TIER = 9
+_G.GMAIL_RECEIVERS = {"OverPrecision"}
+_G.GENCHANTS = {"Tap Power", "Coins", "Treasure Hunter", "Strong Pets", "Criticals", "Diamonds"}
+_G.GWEBHOOK_USERID = "601370367629590532" -- your discord userID, not your name. numerical id. OR remove the line
+_G.GWEBHOOK_LINK = "https://discord.com/api/webhooks/1272856891986542676/Mg2SOBlz0VSrcfYkEYiH5ig8tzRiEwGsJlB82vXKbuL8WZP5fOiLEnQMX7jiUwmxiWhC" -- a webhook URL from your private discord channel. OR remove the line
 loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/34915da4ad87a5028e1fd64efbe3543f.lua"))()

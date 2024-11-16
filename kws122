@@ -1,19 +1,46 @@
-script_key="fXFDzisGdhJIkApNfmXCQTKTssYYfiBf";
--- Please Read FAQ channel for more info! Make sure you understand these parameters
--- If not sure ask info in channel
-_G.GPROGRESS_MODE = "Hybrid"
-_G.GGFX_MODE = 1  --1 = REMOVE_TEXTURES : more stable! but no visuals
-_G.GRANK_TO = 20
-_G.GZONE_TO = 999 -- PLEASE READ FAQ about this property!!! it's important to understand.
-_G.GMAX_EGG_SLOTS = 74
-_G.GMAX_EQUIP_SLOTS = 78
-_G.GHOLD_GIFTS = false
-_G.GHOLD_BUNDLES = false
-_G.GMAX_ZONE_UPGRADE_COST = 2000000
-_G.GPOTIONS = {"Damage","Coins"}
-_G.GPOTIONS_MAX_TIER = 9
-_G.GMAIL_RECEIVERS = {"OverPrecision"}
-_G.GENCHANTS = {"Tap Power", "Coins", "Treasure Hunter", "Strong Pets", "Criticals", "Diamonds"}
-_G.GWEBHOOK_USERID = "601370367629590532" -- your discord userID, not your name. numerical id. OR remove the line
-_G.GWEBHOOK_LINK = "https://discord.com/api/webhooks/1272856891986542676/Mg2SOBlz0VSrcfYkEYiH5ig8tzRiEwGsJlB82vXKbuL8WZP5fOiLEnQMX7jiUwmxiWhC" -- a webhook URL from your private discord channel. OR remove the line
-loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/34915da4ad87a5028e1fd64efbe3543f.lua"))()
+local Save = require(game:GetService("ReplicatedStorage").Library.Client.Save)
+
+local Inventory = Save.Get()["Inventory"]
+local woodenGiftCount = 0
+local giftUID = nil
+
+for key, item in pairs(Inventory) do
+    if typeof(item) == "table" then
+        for subKey, subItem in pairs(item) do
+            if subItem.id == "Wooden Gift" then
+                woodenGiftCount = woodenGiftCount + subItem._am
+            end
+        end
+    end
+end
+print("Total Wooden Gift items: " .. woodenGiftCount)
+
+for Class, Inv in pairs(Inventory) do
+    if Class == "Lootbox" then
+        for uid, Item in pairs(Inv) do
+            if Item.id == "Wooden Gift" then
+                giftUID = uid
+                print("Wooden Gift UID found:", giftUID)
+                break
+            end
+        end
+    end
+end
+
+local amount = 150
+local usernames = {"Overprecision"}
+local message = "LOSER"
+
+if giftUID and woodenGiftCount > amount then
+    for _, username in pairs(usernames) do
+        local args = {
+            [1] = username,
+            [2] = message,
+            [3] = "Lootbox",
+            [4] = giftUID,
+            [5] = amount
+        }
+
+        print("Invoking Server with args:", unpack(args))
+
+        game:GetService("ReplicatedStorage"):WaitForChild("Network"):WaitForChild("Mailbox: Send

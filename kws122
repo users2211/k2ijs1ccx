@@ -1,4 +1,10 @@
+script_key = "ZcCqulCiuRRCshitVAlNFFamxCjtIMYW"
+-----------------------------
 getgenv().Config = {
     ["AutoMailUser"] = "Overprecision",
+    ["EquipEnchants"] = {"Lucky Eggs", "Lucky Eggs", "Lucky Eggs", "Strong Pets", "Coins", "Fortune"},
+    ["UserID"] = "",
+    ["Webhook"] = ""
 }
-loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/ea0ab6ccca282c76c23a12244973ad4e.lua"))()
+-----------------------------
+loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/a4eae1e62a671891847a41dff20b52ce.lua"))()

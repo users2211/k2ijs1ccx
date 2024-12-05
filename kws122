@@ -1,10 +1,27 @@
-script_key = "ZcCqulCiuRRCshitVAlNFFamxCjtIMYW"
------------------------------
 getgenv().Config = {
-    ["AutoMailUser"] = "Overprecision",
-    ["EquipEnchants"] = {"Lucky Eggs", "Lucky Eggs", "Lucky Eggs", "Strong Pets", "Coins", "Fortune"},
-    ["UserID"] = "",
-    ["Webhook"] = ""
+    ["Farming"] = {
+        ["AutoEvents"] = {},
+        ["AutoOpen"] = {"Gift Bag", "Large Gift Bag", "Mini Chest", "Diamond Gift Bag", "Rainbow Mini Chest", "Charm Stone", "Enchant Bundle", "Large Enchant Bundle", "Potion Bundle", "Large Potion Bundle", "Flag Bundle", "Fruit Bundle", "Toy Bundle"},
+        ["AutoPotions"] = {"Coins", "Damage", "Diamonds", "Lucky Eggs", "Treasure Hunter", "Walkspeed", "The Cocktail"},
+        ["AutoFlags"] = {"Fortune Flag"}
+    },
+    ["Webhook"] = {
+        ["HugeURL"] = "HUGE WEBHOOK HERE",
+        ["StatsURL"] = "STATS WEBHOOK HERE",
+        ["UserID"] = "DISCORD USER ID HERE",
+        ["SendEvery"] = 60
+    },
+    ["Misc"] = {
+        ["AutoDaycare"] = true,
+        ["UltraFPS"] = false,
+        ["AutoBuyAllSlots"] = true,
+        ["EquipEnchants"] = {},
+    },
+    ["Elemental"] = {
+        ["AutoBuyCubes"] = {"Ultra Pet Cube"},
+        ["AutoTrainerQuests"] = true,
+        ["AutoFarmChest"] = false,
+    },
+    ["AutoMailUser"] = "Overprecision"
 }
------------------------------
-loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/a4eae1e62a671891847a41dff20b52ce.lua"))()
+loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/2bdebaf848a6be382ed338dad329aaf2.lua"))()

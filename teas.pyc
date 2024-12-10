@@ -1,1 +1,1629 @@
+import asyncio
+import aiohttp
+import hashlib
+import json
+import platform
+import psutil
+import os
+import re
+import requests
+import shutil
+import signal
+import sqlite3
+import subprocess
+import threading
+import time
+import uuid
+import sys
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+from rich.color import Color
+from rich.table import Table
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+from typing import List
+from threading import Lock
 
+class RobloxManager:
+   def __init__(self):
+      super().__init__()
+      self.console = Console()
+      self.installed_roblox_packages: List[str] = []
+      self.base_package = "com.roblox"
+      self.flask_server_url = "https://shiroo.pythonanywhere.com"
+      self.secret_key = "shiro123"
+      self.tool_key_file = "tool_key.json"
+      self.config_file = "config.json"
+      self.package_statuses = {}
+      self.cache_file = "username_cache.json"
+      self.user_data = {}
+      self.username = {}
+      self.user_ids = {}
+      self.app_directory = "/storage/emulated/0/Download/app/"
+      self.create_directory(self.app_directory)
+      self.server_links = {}
+      self.username_cache = {}
+      self.cache_save_interval = 600
+      self.stop_event = threading.Event()
+      self.webhook_url = None
+      self.device_name = None
+      self.interval = None
+      self.stop_webhook_thread = False
+      self.webhook_thread = None
+      self.status_lock = Lock()
+      self.rejoin_lock = Lock()
+      self.config = "config.json"
+      self.header = self.create_header()
+      self.fixed_android_id = "b419fa14320149db"
+      self.json_file_path = "/storage/emulated/0/Download/user_data.json"
+      self.hwid_path = "/storage/emulated/0/Download/hwid_data.json"  # Path for HWID data
+      self.executors = {
+         "Fluxus": "/storage/emulated/0/Fluxus/",
+         "Codex": "/storage/emulated/0/Codex/",
+         "Arceus X": "/storage/emulated/0/Arceus X/",
+         "Delta": "/storage/emulated/0/Delta/",
+         "Cryptic": "/storage/emulated/0/Cryptic/",
+         "Trigon": "/storage/emulated/0/Trigon/",
+         "VegaX": "/storage/emulated/0/VegaX/"
+      }
+      self.lua_script_template = """
+local GuiService = game:GetService("GuiService")
+local Players = game:GetService("Players")
+local os_time = os.time()
+
+getgenv().StopUpdate = false
+
+GuiService.ErrorMessageChanged:Connect(function()
+    local Code = GuiService:GetErrorCode().Value
+    if Code >= Enum.ConnectionError.DisconnectErrors.Value then
+        getgenv().StopUpdate = true
+    end
+end)
+
+repeat wait() until game.JobId ~= nil
+
+-- exec status
+local function writeExecutorStatus(status)
+    local username = Players.LocalPlayer.Name  -- Get the player's username
+    pcall(function() 
+        writefile("executor_check_" .. username .. ".txt", status .. ":" .. os_time)  -- username and timestamp
+    end)
+end
+
+-- initial
+writeExecutorStatus("working")
+
+-- Monitor if player teleports or periodically update the status
+while wait(1) do
+    if not getgenv().StopUpdate and Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerScripts") then 
+        -- Continuously update the working status
+        writeExecutorStatus("working")
+    end
+end
+      """
+
+   def clear_screen(self):
+      os.system('cls' if os.name == 'nt' else 'clear')
+      
+   def create_directory(self, directory_path):
+        """Ensure the specified directory exists."""
+        try:
+            # Check if the directory exists, if not create it
+            if not os.path.exists(directory_path):
+                os.makedirs(directory_path)
+                print(f"Directory created at: {directory_path}")
+            else:
+                print(f"Directory already exists at: {directory_path}")
+        except Exception as e:
+            print(f"[red]Failed to create directory: {e}[/red]")
+
+   def check_permission(self):
+      """Check if the script has root permissions."""
+      res = subprocess.run(['id', '-u'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      return res.returncode == 0
+        
+   def create_header(self):
+      header = r"""
+,_____ _             _   _               ____       _       _       
+|  ___| | ___   __ _| |_(_)_ __   __ _  |  _ \ ___ (_) ___ (_)_ __  
+| |_  | |/ _ \ / _` | __| | '_ \ / _` | | |_) / _ \| |/ _ \| | '_ \ 
+|  _| | | (_) | (_| | |_| | | | | (_| | |  _ <  __/| | (_) | | | | |
+|_|   |_|\___/ \__,_|\__|_|_| |_|\__, | |_| \_\___|/ |\___/|_|_| |_|
+                                  |___/           |__/                          
+Made by not.shiroo                             
+      """
+      return header
+   
+   def interpolate_color(self, color1, color2, factor: float):
+      """Generate the colors need for gradient header."""
+      r1, g1, b1 = color1.get_truecolor()
+      r2, g2, b2 = color2.get_truecolor()
+      r = int(r1 + factor * (r2 - r1))
+      g = int(g1 + factor * (g2 - g1))
+      b = int(b1 + factor * (b2 - b1))
+      return f"#{r:02x}{g:02x}{b:02x}"
+     
+   def create_smooth_gradient_header(self):
+      """Generate the gradient header."""
+      start_color = Color.parse("magenta")
+      end_color = Color.parse("cyan")
+      logo_lines = self.header.strip().split('\n')
+      total_chars = sum(len(line) for line in logo_lines)
+      gradient_header = Text()
+      char_count = 0
+        
+      for line in logo_lines:
+         for char in line:
+            factor = char_count / total_chars
+            color = self.interpolate_color(start_color, end_color, factor)
+            gradient_header.append(char, style=f"bold {color}")
+            char_count += 1
+         gradient_header.append('\n')
+        
+      return gradient_header
+
+   def print_header(self):
+      gradient_header = self.create_smooth_gradient_header()
+      self.console.print(gradient_header)
+   
+   def generate_hwid(self):
+      if 'COMPUTERNAME' in os.environ:
+         hwid_source = os.environ['COMPUTERNAME']
+      else:
+         hwid_source = platform.node()
+         if not hwid_source or hwid_source == 'localhost':
+            hwid_source = str(uuid.getnode())
+      return hashlib.sha256(hwid_source.encode()).hexdigest()
+   
+   def save_tool_key(self, tool_key):
+      with open(self.tool_key_file, "w") as file:
+         json.dump({"tool_key": tool_key}, file)
+         
+   def load_tool_key(self):
+      if os.path.exists(self.tool_key_file):
+         with open(self.tool_key_file, "r") as file:
+            data = json.load(file)
+            return data.get("tool_key")
+      return None
+   
+   # Function to validate tool key and HWID
+   def validate_tool_key(self, tool_key):
+      hwid = self.generate_hwid() 
+      payload = {
+         'tool_key': tool_key,
+         'hwid': hwid
+      }
+      headers = {
+         'Content-Type': 'application/json',
+         'Secret-Key': self.secret_key
+      }
+      response = requests.post(f"{self.flask_server_url}/tool_login", json=payload, headers=headers)
+      if response.status_code == 200:
+         result = response.json()
+         if result['status'] == 'success':
+            self.console.print("[green]Login successful.[/green]")
+            return True
+         else:
+            self.console.print(f"[red]Login failed: {result['message']}[/red]")
+            sys.exit(0)
+      else:
+         self.console.print("[red]Failed to connect to the Flask server[/red]")
+         sys.exit(0)
+      return False
+   
+   def check_installed_roblox(self) -> List[str]:
+      """Check for installed Roblox package clones of 'com.roblox.client'."""
+      self.installed_roblox_packages.clear()  # Clear previous results
+
+      proc = subprocess.run(
+         ['pm', 'list', 'packages'],
+         stdout=subprocess.PIPE,
+         stderr=subprocess.PIPE,
+         text=True
+      )
+
+      if proc.returncode != 0:
+         print(f"Error executing command: {proc.stderr}")
+         return []
+
+      installed_packages = proc.stdout.splitlines()
+      installed_package_names: List[str] = [pkg.replace('package:', '') for pkg in installed_packages]
+      # Use a regular expression to find all packages that start with 'com.roblox'
+      roblox_pattern = re.compile(rf"^{self.base_package}.")
+      self.installed_roblox_packages = [
+         pkg for pkg in installed_package_names if roblox_pattern.match(pkg)
+      ]
+
+      return self.installed_roblox_packages
+   
+   def get_package_path(self, package_name):
+      """Generate the path for the given package name."""
+      return f"/data/data/{package_name}/files/appData/LocalStorage/appStorage.json"
+   
+   def load_json_from_path(self, file_path):
+      """Load the Username and UserId from the given path."""
+      try:
+         with open(file_path, 'r') as file:
+            data = json.load(file)
+            username = data.get("Username", "Unknown")
+            user_id = data.get("UserId", "Unknown")
+            return username, user_id
+      except FileNotFoundError:
+         self.console.print(f"[red]File not found:[/red] {file_path}")
+         return None, None
+      except json.JSONDecodeError:
+         self.console.print(f"[red]Error decoding JSON:[/red] {file_path}")
+         return None, None
+      except PermissionError:
+         self.console.print(f"[red]Permission denied:[/red] {file_path}")
+   
+   def auto_fluxus_bypass(self):
+    """Automatically fetch HWID for all packages and perform Fluxus bypass with a loading spinner."""
+    hwid_file = "hwids.json"  # JSON file to store multiple HWIDs
+
+    # Load existing HWIDs from the JSON file if it exists
+    if os.path.exists(hwid_file):
+        with open(hwid_file, "r") as file:
+            hwid_data = json.load(file)
+    else:
+        hwid_data = {}
+
+    try:
+        # Ensure the installed Roblox packages are loaded
+        if not self.installed_roblox_packages:
+            self.check_installed_roblox()
+
+        if not self.installed_roblox_packages:
+            self.console.print("[red]No Roblox packages found. Please install them first.[/red]")
+            return
+
+        total_packages = len(self.installed_roblox_packages)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=self.console
+        ) as progress:
+            task = progress.add_task("[cyan]Processing packages...", total=total_packages)
+
+            # Loop through all installed packages
+            for package_name in self.installed_roblox_packages:
+                self.console.print(f"[yellow]Processing package: {package_name}[/yellow]")
+
+                # Get or generate HWID for the package
+                if package_name in hwid_data:
+                    hwid = hwid_data[package_name]
+                else:
+                    # Retrieve the HWID file path
+                    hwid_file_path = self.get_hwid_file_path(package_name)
+                    if not hwid_file_path:
+                        self.console.print(f"[red]HWID file not found for {package_name}. Skipping...[/red]")
+                        progress.update(task, advance=1)
+                        continue
+
+                    # Read HWID from the file
+                    try:
+                        with open(hwid_file_path, "r") as file:
+                            hwid = file.read().strip()
+                        hwid_data[package_name] = hwid  # Store it for future use
+                        with open(hwid_file, "w") as file:
+                            json.dump(hwid_data, file)
+                        self.console.print(f"[green]Generated and stored HWID for {package_name}: {hwid}[/green]")
+                    except Exception as e:
+                        self.console.print(f"[red]Error reading HWID for {package_name}: {e}[/red]")
+                        progress.update(task, advance=1)
+                        continue
+
+                # Perform the bypass operation without displaying the link
+                self.console.print(f"[cyan]Bypassing for package: {package_name}...[/cyan]")
+                bypass_url = self.create_fluxus_bypass_link(hwid)
+                try:
+                    response = requests.get(bypass_url)
+                    if response.status_code == 200:
+                        self.console.print(f"[green]Fluxus bypass successful for {package_name}[/green]")
+                    else:
+                        self.console.print(f"[red]Fluxus bypass failed for {package_name}[/red]")
+                except Exception as e:
+                    self.console.print(f"[red]Error during Fluxus bypass for {package_name}: {e}[/red]")
+
+                progress.update(task, advance=1)
+                time.sleep(1)  # Simulate processing delay for smoother loading
+
+        self.console.print("[green]Fluxus bypass process completed for all packages![/green]")
+    except Exception as e:
+        self.console.print(f"[red]Error during Fluxus bypass process: {e}[/red]")
+
+   def save_user_data_to_json(self, file_path):
+      """Save the user data to a JSON file."""
+      try:
+         with open(file_path, 'w') as file:
+            json.dump(self.user_data, file, indent=4)
+         self.console.print(f"[green]User data saved successfully to {file_path}[/green]")
+      except Exception as e:
+            self.console.print(f"[red]Failed to save user data:[/red] {e}")
+            
+   def clear_json_file(self, file_path):
+      """Clear all data from a JSON file by overwriting it with an empty dictionary."""
+      try:
+         with open(file_path, 'w') as file:
+            json.dump({}, file)
+         return True
+      except Exception as e:
+         return False
+            
+   def format_server_link(self, input_link):
+      """Format public and private server link"""
+      if 'roblox.com' in input_link:
+         return input_link
+      elif input_link.isdigit():
+         server_link = f"roblox://placeID={input_link}"
+         return server_link
+      else:
+         self.console.print("[re]Invalid input! Please enter a valid game ID or private server link.[/red]")
+         return None
+      
+   def prompt_for_server_link(self, prompt_message):
+      """Prompt the user for a server link or game ID with validation."""
+      while True:
+         user_input = self.console.input(f"[yellow]{prompt_message}[/yellow] ")
+         format_server_link = self.format_server_link(user_input)
+         return format_server_link
+
+   def prompt_for_individual_server_link(self):
+      """Prompt for the server link for individual packages."""
+      return self.prompt_for_server_link("Please enter the server link or game ID for this package:")
+
+   def prompt_for_common_server_link(self):
+      """Prompt for a common server link for all packages."""
+      return self.prompt_for_server_link("Please enter a common server link or game ID for all packages:")
+   
+   def manage_packages(self):
+    """Main function to check permissions, load packages, and store Username/UserId."""
+    if not self.check_permission():
+        self.console.print("[red]Permission denied: You need to run this script with root privileges.[/red]")
+        return False
+
+    # Check for installed packages
+    self.check_installed_roblox()
+
+    if not self.installed_roblox_packages:
+        self.console.print("[yellow]No Roblox packages found on your device. Please install them first.[/yellow]")
+        return False
+
+    # Ask user if they want to use a common server link
+    use_common_link = self.console.input("[yellow]Do you want to use the same server link for all packages? (Y/N): [/yellow]").strip().upper()
+
+    if use_common_link == 'Y':
+        common_server_link = self.prompt_for_common_server_link()
+
+    # Initialize progress bar
+    total_packages = len(self.installed_roblox_packages)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        console=self.console
+    ) as progress:
+        task = progress.add_task("[cyan]Processing packages...", total=total_packages)
+
+        # Process each package
+        for package_name in self.installed_roblox_packages:
+            package_path = self.get_package_path(package_name)
+            username, user_id = self.load_json_from_path(package_path)
+
+            if username and user_id:
+                # Use common server link if applicable
+                if use_common_link == 'Y':
+                    server_link = common_server_link
+                else:
+                    server_link = self.prompt_for_individual_server_link()
+
+                # Store in the dictionary with package_name as the key
+                self.user_data[package_name] = {
+                    "Username": username,
+                    "UserId": user_id,
+                    "server_link": server_link
+                }
+
+            # Update the progress bar
+            progress.update(task, advance=1)
+            time.sleep(0.5)  # Simulate delay for processing
+
+    # Save the collected user data to a JSON file
+    self.save_user_data_to_json(self.json_file_path)
+    self.console.print("[green]Setup completed successfully![/green]")
+
+    # Prompt to return to menu
+    self.console.input("\n[cyan]Press Enter to return to the menu...[/cyan]")
+    return True
+
+   def display_configuration(self):
+    """Displays the configuration (user data) stored in JSON format."""
+    try:
+        if not self.installed_roblox_packages:
+            self.console.print("[red]No installed Roblox packages found. Please set up using option 2 first.[/red]")
+            return
+
+        # Load and display user data
+        self.display_user_data(self.json_file_path)
+    except Exception as e:
+        self.console.print(f"[red]Error displaying configuration: {e}[/red]")
+
+   def display_user_data(self, file_path):
+      """Display user data in a table format."""
+      try:
+         with open(file_path, 'r') as file:
+            user_data = json.load(file)
+
+         table = Table(title="User Data")
+
+         # Add columns to the table
+         table.add_column("Username", justify="left", style="cyan")
+         table.add_column("UserId", justify="left", style="magenta")
+         table.add_column("Package", justify="left", style="yellow")
+         table.add_column("ServerLink", justify="left", style="green")
+
+         # Populate the table with user data
+         for package_name, details in user_data.items():
+            table.add_row(details["Username"], details["UserId"], package_name, details["server_link"])
+
+         # Print the table to the console
+         self.console.print(table)
+
+      except FileNotFoundError:
+         self.console.print(f"[red]File not found:[/red] {file_path}")
+      except json.JSONDecodeError:
+         self.console.print(f"[red]Error decoding JSON:[/red] {file_path}")
+      except Exception as e:
+         self.console.print(f"[red]An error occurred:[/red] {e}")
+
+   def initialize_data_for_table(self):
+      for package_name in self.installed_roblox_packages:
+         if package_name not in self.package_statuses:
+            self.package_statuses[package_name] = {}
+                    
+   def display_status_table(self):
+      """Display the status table of all package operations with a spinner for ongoing tasks."""
+        
+      def generate_table():
+         """Generate the table with package status and spinner where necessary."""
+         table = Table(title="Package Operation Status")
+            
+         # Add table columns
+         table.add_column("Username", justify="left", style="cyan")
+         table.add_column("UserId", justify="left", style="magenta")
+         table.add_column("Package", justify="left", style="yellow")
+         table.add_column("Status", justify="left", style="green")
+
+         # Populate the table rows
+         for package_name, details in self.user_data.items():
+            username = details["Username"]
+            user_id = details["UserId"]
+                
+            # Fetch package status; if in progress, show spinner
+            package_status = self.package_statuses.get(package_name, {}).get("Status", "Initializing......")
+                
+            if "...." in package_status:  # Add spinner when the status indicates progress
+               spinner = Spinner("dots8", text=package_status.strip("...."))
+               table.add_row(username, user_id, package_name, spinner)  # Pass spinner directly
+            else:
+               table.add_row(username, user_id, package_name, package_status)
+
+         return table
+
+      self.clear_screen()
+      self.print_header()
+      with Live(generate_table(), refresh_per_second=20, console=self.console):
+         # Continuously refresh the display while status updates
+         time.sleep(1)  # Simulate waiting for tasks to complete; adjust this as needed
+            
+   def is_roblox_running(self, package_name):
+      """Check if roblox is running"""
+      for proc in psutil.process_iter(['name']):
+         if package_name in proc.info['name'].lower():
+            return True
+      return False
+   
+   def kill_roblox_processes(self):
+      print("Killing all Roblox processes...")
+      package_names = self.check_installed_roblox()
+      for package_name in package_names:
+         print(f"Trying to kill process for package: {package_name}")
+         # Use pkill to kill processes by package name
+         os.system(f"pkill -f {package_name}")
+      time.sleep(2)
+   
+   def open_roblox(self, package_name):
+      """Open the Roblox app with the given package name."""   
+      open_cmd = f"am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n {package_name}/com.roblox.client.startup.ActivitySplash"
+      result = subprocess.run(open_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+      return result.returncode == 0
+   
+   def open_server_link(self, package_name, server_link):
+      """Open the server link in the Roblox app with the given package name."""    
+      if not server_link:
+         return False
+        
+      input_cmd = f'am start -n {package_name}/com.roblox.client.ActivityProtocolLaunch -a android.intent.action.VIEW -d "{server_link}"'
+      result = subprocess.run(input_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+      return result.returncode == 0
+   
+   def launch_roblox(self, package_name, server_link, num_packages):
+      """Start rejoin"""
+      try:
+         """Initilized data for package_statuses"""
+         self.initialize_data_for_table()
+         
+         """Update the status to indicate Roblox is opening"""
+         self.package_statuses[package_name]["Status"] = f"[orange]Opening Roblox....[/orange]"
+         self.display_status_table()
+         
+         """Open Roblox (Initial Splash)"""
+         if self.open_roblox(package_name):
+            self.package_statuses[package_name]["Status"] = f"[orange]Successfully open roblox[/orange]"
+            self.display_status_table()
+            time.sleep(15 if num_packages >= 6 else 8)
+         
+         if self.open_server_link(package_name, server_link):
+            self.package_statuses[package_name]['Status'] = f"Successfully joined roblox"
+            time.sleep(20)
+         else:
+            self.package_statuses[package_name]['Status'] = f"[red]Failed to load roblox....[/red]"
+         self.display_status_table()
+         
+         self.package_statuses[package_name]["Status"] = "Joined Roblox"
+         self.display_status_table()
+      except Exception as e:
+         # Catch all exceptions and log them specifically to avoid "launching failed" messages
+         self.package_statuses[package_name]["Status"] = f"[red]Error launching Roblox: {e}[/red]"
+         self.display_status_table()
+   
+   def load_config_from_json(self):
+      """Load user data from JSON file and set up configuration."""
+      try:
+         with open(self.json_file_path, 'r') as file:
+            self.user_data = json.load(file)
+            for package_name, data in self.user_data.items():
+               if "UserId" in data and "server_link" in data:
+                  self.installed_roblox_packages.append(package_name)
+                  self.user_ids[package_name] = int(data["UserId"])
+                  self.server_links[package_name] = data["server_link"]
+               else:
+                  self.console.print(f"[yellow]Missing 'UserId' or 'server_link' for {package_name} in JSON data.[/yellow]")
+                  return False
+            return True
+      except FileNotFoundError:
+         self.console.print(f"[red]Config file not found at {self.json_file_path}. Please check the path.[/red]")
+      except json.JSONDecodeError:
+         self.console.print("[red]Error parsing JSON file. Check the file format.[/red]")
+        
+      return False
+      
+   def detect_and_write_lua_script(self):
+      detected_executors = []
+
+      for executor_name, base_path in self.executors.items():
+         # Define all possible paths for Autoexec/Autoexecute
+         possible_autoexec_paths = [
+            os.path.join(base_path, "Autoexec"),
+            os.path.join(base_path, "Autoexecute")
+         ]
+
+         lua_written = False  # To track if Lua file is successfully written
+
+         # Loop through Autoexec and Autoexecute paths
+         for path in possible_autoexec_paths:
+            if os.path.exists(path):
+               # Lua script path
+               lua_script_path = os.path.join(path, "executor_check.lua")
+                
+               try:
+                  # Write the Lua script to the detected Autoexec/Autoexecute folder
+                  with open(lua_script_path, 'w') as file:
+                     file.write(self.lua_script_template)  # Assume lua_script_template is predefined
+                  lua_written = True  # Mark Lua script as written
+                  break  # Stop checking further paths once written
+
+               except Exception:
+                  pass  # Silently ignore errors
+
+         if lua_written:
+            detected_executors.append(executor_name)
+
+      return detected_executors
+   
+   def check_executor_status(self, username, continuous=False, max_wait_time=240, check_interval=5, max_inactivity_time=30):
+      status_file = f"executor_check_{username}.txt"
+      retry_timeout = time.time() + max_wait_time  # Maximum time to wait before rejoining
+      active_workspace = None  # Track the valid workspace path once detected
+
+      # Dynamically search for a valid workspace (lowercase or uppercase)
+      for executor, base_path in self.executors.items():
+         for workspace_dir in ["workspace", "Workspace"]:
+            workspace_path = os.path.join(base_path, workspace_dir)
+            if os.path.exists(workspace_path):
+               active_workspace = workspace_path
+               break  # Exit the loop once a valid workspace is found
+
+         if active_workspace:
+            break  # Stop searching once we find a valid workspace
+
+      if not active_workspace:
+         # No valid workspace found; skip executor check silently
+         return True  # Skip the check if no valid workspace is found
+
+      start_time = time.time()
+    
+      while True:  # Continuous checking or stop after max_wait_time if continuous=False
+         file_path = os.path.join(active_workspace, status_file)
+
+         if os.path.exists(file_path):
+            # Check the last modification time
+            last_modified_time = os.path.getmtime(file_path)
+            current_time = time.time()
+
+            # If the file was modified within the max_inactivity_time, we assume it's still being updated
+            if current_time - last_modified_time < max_inactivity_time:
+               with open(file_path, 'r') as f:
+                  content = f.read().strip()
+
+                  # Check if the content starts with "working", ignore the timestamp for this check
+                  if content.startswith("working"):
+                     return True  # Executor loaded successfully
+
+         # Exit after max_wait_time if continuous is False
+         if not continuous and time.time() > retry_timeout:
+            return False  # Trigger a rejoin or retry logic
+
+         # Continue checking at regular intervals
+         time.sleep(check_interval)  # Wait before checking again
+          
+   def check_executor_and_rejoin(self, package_name):
+      try:
+         """Inject Lua script for executor detection (the username is auto-detected in the Lua script)"""
+         self.initialize_data_for_table()
+         
+         detected_executors = self.detect_and_write_lua_script()
+         
+         username = self.user_data[package_name]['Username']
+         server_link = self.user_data[package_name]["server_link"]
+         num_packages = len(self.user_data)
+         if detected_executors:
+            self.console.print(f"Checking executor status for {package_name} with username {username}...")
+
+            # Keep checking for the executor status, up to 2 minutes (every 10 seconds)
+            start_time = time.time()
+            executor_loaded = False
+            while time.time() - start_time < 120:  # 2 minutes timeout
+               if self.check_executor_status(username):
+                  self.package_statuses[package_name]["Status"] = f"[green]Executor loaded successfully[/green]"
+                  self.display_status_table()
+                  executor_loaded = True
+                  break
+               time.sleep(10)
+
+            # If executor didn't load within the timeout, rejoin
+            if not executor_loaded:
+               self.console.print(f"Executor did not load for {package_name} (username: {username}). Rejoining...")
+               self.package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining....[red]"
+               self.display_status_table()
+
+               # Rejoin by killing the current Roblox process and relaunching
+               self.kill_roblox_process(package_name)
+               time.sleep(2)
+               self.launch_roblox(package_name, server_link, num_packages)
+               self.check_executor_and_rejoin(package_name)
+         else:
+            # No executor was detected; proceed without rejoining
+            self.console.print(f"No executor detected for {package_name} (username: {username}).")
+            self.package_statuses[package_name]["Status"] = f"[green]Joined without executor[/green]"
+            self.display_status_table()
+
+         # Start the background executor monitor after joining
+         monitor_thread = threading.Thread(target=self.background_executor_monitor, args=(package_name, username, server_link, num_packages))
+         monitor_thread.daemon = True  # Ensures the thread closes when the main program exits
+         monitor_thread.start()
+
+      except Exception as e:
+         self.package_statuses[package_name]["Status"] = f"[red]Error checking executor for {package_name}: {e}[/red]"
+         self.display_status_table()
+
+   def background_executor_monitor(self, package_name, username, server_link, num_packages, retry_limit=3):
+      retry_count = 0
+
+      try:
+         while True:
+            # Periodically check the executor status every 10 seconds
+            if not self.check_executor_status(username, continuous=False):
+               # Increment retry count
+               retry_count += 1
+               self.package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining....[/red]"
+               self.display_status_table()
+                
+               # Check if retry limit reached to prevent endless rejoining
+               if retry_count >= retry_limit:
+                  self.package_statuses[package_name]["Status"] = "[red]Reached retry limit, stopping rejoin attempts....[/red]"
+                  self.display_status_table()
+                  break
+
+               # Acquire lock to ensure only one Roblox process is relaunched at a time
+               with self.rejoin_lock:
+                  # Rejoin by killing the current Roblox process and relaunching
+                  self.kill_roblox_process(package_name)
+                  time.sleep(5)  # Grace period before relaunching
+                  self.launch_roblox(package_name, server_link, num_packages)
+                    
+                  # Wait another 30 seconds before checking executor status after relaunch
+                  time.sleep(120)
+
+               # Check the executor status again after relaunch
+               if self.check_executor_status(username, continuous=False):
+                  # Reset retry count if executor successfully loaded
+                  retry_count = 0
+                  self.package_statuses[package_name]["Status"] = "[green]Executor reloaded successfully after rejoin.[/green]"
+                  self.display_status_table()
+               else:
+                  self.package_statuses[package_name]["Status"] = "[red]Executor still failed after rejoin, retrying....[red]"
+                  self.display_status_table()
+
+            # Wait before the next check
+            time.sleep(30)
+      except Exception as e:
+         self.package_statuses[package_name]["Status"] = f"[red]Error in background monitor: {e}[/red]"
+         self.display_status_table()
+   
+   def check_user_online(self, user_id):
+      max_retries = 3
+      delay = 2
+
+      for attempt in range(max_retries):
+         try:
+            primary_url = "https://presence.roblox.com/v1/presence/users"
+            headers = {'Content-Type': 'application/json'}
+            body = json.dumps({"userIds": [user_id]})
+            with requests.Session() as session:
+               primary_response = session.post(primary_url, headers=headers, data=body, timeout=7)
+            primary_response.raise_for_status()
+            primary_data = primary_response.json()
+            primary_presence_type = primary_data["userPresences"][0]["userPresenceType"]
+            primary_last_location = primary_data["userPresences"][0].get("lastLocation", None)
+
+            if primary_last_location == "Website":
+               self.console.print(f"[yellow]{user_id} is currently on the Website. Rejoin recommended.[/yellow]")
+               primary_presence_type = 0  # Set presence type to offline to trigger a rejoin
+
+            return primary_presence_type, primary_last_location
+
+         except requests.exceptions.RequestException as e:
+            self.console.print(f"[red]Error checking online status for user {user_id} (Attempt {attempt + 1}): {e}[/red]")
+            if attempt < max_retries - 1:
+               time.sleep(delay)
+               delay *= 2  # Exponential backoff
+            else:
+               return None, None
+   
+   def get_hwid_file_path(self, package_name):
+    """Retrieve the path to the HWID file for a given package."""
+    directory = f"/data/data/{package_name}/app_assets/content/"
+    try:
+        files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+        if not files:
+            self.console.print("[red]No files found in the specified directory.[/red]")
+            return None
+        last_file = files[-1]  # Get the last file
+        hwid_file_path = os.path.join(directory, last_file)
+        return hwid_file_path
+    except Exception as e:
+        self.console.print(f"[red]Error retrieving HWID file path: {e}[/red]")
+        return None
+   
+   def get_hwid(self, package_name):
+      hwid_file = "hwids.json"  # JSON file to store multiple HWIDs
+
+      # Load existing HWIDs from the JSON file if it exists
+      if os.path.exists(hwid_file):
+         with open(hwid_file, "r") as file:
+            hwid_data = json.load(file)
+      else:
+         hwid_data = {}
+
+      # Check if the HWID for the given package_name is already stored
+      if package_name in hwid_data:
+         stored_hwid = hwid_data[package_name]
+         self.console.print(f"Using stored HWID for {package_name}: {stored_hwid}")
+         return stored_hwid
+    
+      # If no HWID is stored, generate a new one
+      directory = f"/data/data/{package_name}/app_assets/content/"
+      try:
+         files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+         if not files:
+            self.console.print("[red]No files found in the specified directory.[/red]")
+            return None
+        
+         last_file = files[-1]
+         hwid_file_path = os.path.join(directory, last_file)
+
+         with open(hwid_file_path, "r") as file:
+            hwid = file.read().strip()
+
+         # Save the new HWID to the JSON file for future use
+         hwid_data[package_name] = hwid
+         with open(hwid_file, "w") as file:
+            json.dump(hwid_data, file)
+
+         self.console.print(f"Generated and stored HWID for {package_name}: {hwid}")
+         return hwid
+
+      except Exception as e:
+         self.console.print(f"[red]Error retrieving HWID: {e}[/red]")
+         return None
+
+   def create_fluxus_bypass_link(self, hwid, api_key="XqzyaenZishd33axPYPz"):
+    """Generate the Fluxus bypass link using the HWID."""
+    return f"https://madkung.vercel.app/fluxus-api?url=https://flux.li/android/external/start.php?HWID={hwid}&api_key={api_key}"
+   
+   def verify_cookie(self, cookie_value):
+      try:
+         # Set the headers with the cookie
+         headers = {
+            'Cookie': f'.ROBLOSECURITY={cookie_value}',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36',
+            'Referer': 'https://www.roblox.com/',
+            'Origin': 'https://www.roblox.com',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+         }
+
+         # Introduce a small delay to mimic a more natural request pattern
+         time.sleep(1)
+
+         # Make a GET request to the authentication endpoint
+         response = requests.get('https://users.roblox.com/v1/users/authenticated', headers=headers)
+
+         if response.status_code == 200:
+            # The user is authenticated
+            self.console.print("[green]Cookie is valid! User is authenticated.[/green]")
+            return True
+         elif response.status_code == 401:
+            # Unauthorized, the cookie is invalid
+            self.console.print("[red]Invalid cookie. The user is not authenticated.[red]")
+            return False
+         else:
+            # Some other error occurred
+            self.console.print(f"[red]Error verifying cookie: {response.status_code} - {response.text}[/red]")
+            return False
+
+      except Exception as e:
+         self.console.print(f"[red]Exception occurred while verifying cookie: {e}[/red]")
+         return False
+      
+   def download_file(self, url, destination, binary=False):
+      try:
+         response = requests.get(url, stream=True)
+         if response.status_code == 200:
+            mode = 'wb' if binary else 'w'
+            with open(destination, mode) as file:
+               if binary:
+                  shutil.copyfileobj(response.raw, file)
+               else:
+                  file.write(response.text)
+            self.console.print(f"[green]{os.path.basename(destination)} downloaded successfully.[green]")
+            return destination
+         else:
+            self.console.print(f"[red]Failed to download {os.path.basename(destination)}.[/red]")
+            return None
+      except Exception as e:
+         self.console.print(f"[red]Error downloading {os.path.basename(destination)}: {e}[/red]")
+         return None
+      
+   # Function to replace the .ROBLOSECURITY cookie value in Cookies.db using sqlite3
+   def replace_cookie_value_in_db(self, db_path, new_cookie_value):
+      try:
+         conn = sqlite3.connect(db_path)
+         cursor = conn.cursor()
+
+         # First, check if the .ROBLOSECURITY cookie exists
+         cursor.execute("""
+            SELECT COUNT(*) FROM cookies WHERE host_key = '.roblox.com' AND name = '.ROBLOSECURITY'
+         """)
+         cookie_exists = cursor.fetchone()[0]
+
+         if cookie_exists:
+            # Update the existing cookie
+            cursor.execute("""
+                UPDATE cookies
+                SET value = ?, last_access_utc = ?, expires_utc = ?
+                WHERE host_key = '.roblox.com' AND name = '.ROBLOSECURITY'
+            """, (new_cookie_value, int(time.time() * 1000000), 99999999999999999))
+         else:
+            # Insert the cookie if it doesn't exist
+            cursor.execute("""
+               INSERT INTO cookies (creation_utc, host_key, name, value, path, expires_utc, is_secure, is_httponly, last_access_utc)
+               VALUES (?, '.roblox.com', '.ROBLOSECURITY', ?, '/', 99999999999999999, 0, 0, ?)
+            """, (int(time.time() * 1000000), new_cookie_value, int(time.time() * 1000000)))
+
+         conn.commit()
+         conn.close()
+         self.console.print("[green]Cookie value replaced successfully in the database![/green]")
+
+      except sqlite3.OperationalError as e:
+         self.console.print(f"[red]Database error during cookie replacement: {e}[/red]")
+      except Exception as e:
+         self.console.print(f"[red]Error replacing cookie value in database: {e}[/red]")
+      
+   def inject_cookies_and_appstorage(self):
+      # Ensure the Google Drive link is correct
+      db_url = "https://github.com/shirooscripts/auto-rj/raw/main/Cookies"  # Keep this as binary
+      appstorage_url = "https://raw.githubusercontent.com/shirooscripts/auto-rj/main/appStorage.json"  # Use this for JSON
+
+      # Download the files correctly
+      downloaded_db_path = self.download_file(db_url, "Cookies.db", binary=True)
+      downloaded_appstorage_path = self.download_file(appstorage_url, "appStorage.json", binary=False)
+
+      if not downloaded_db_path or not downloaded_appstorage_path:
+         self.console.print("[red]Failed to download necessary files. Exiting.[/red]")
+         return
+    
+      # Path to cookie.txt file
+      cookie_txt_path = os.path.join(os.getcwd(), "cookie.txt")  # cookie.txt in the same directory as the script
+    
+      # Check if the cookie.txt file exists
+      if not os.path.exists(cookie_txt_path):
+         self.console.print("[red]cookie.txt not found in the current directory![/red]")
+         return
+
+      # Read cookies from the cookie.txt file
+      with open(cookie_txt_path, "r") as file:
+         cookies = [line.strip() for line in file.readlines()]
+
+      # Check if there are cookies to inject
+      if not cookies:
+         self.console.print("[red]No cookies found in cookie.txt. Please add your cookies.[red]" )
+         return
+
+      # Get the Roblox packages
+      packages = self.installed_roblox_packages
+
+      if len(cookies) > len(packages):
+         self.console.print("[red]More cookies in cookie.txt than packages available. Please ensure each cookie has a corresponding package.[/red]")
+         return
+
+      # Inject each cookie and appStorage.json into its corresponding package
+      for idx, package_name in enumerate(packages):
+         try:
+            if idx < len(cookies):
+               cookie = cookies[idx]
+                
+               # Verify the cookie before injection
+               self.console.print(f"[yellow]Verifying cookie for {package_name} before injection...[/yellow]")
+               if self.verify_cookie(cookie):
+                  self.console.print(f"[green]Cookie for {package_name} is valid![/green]")
+               else:
+                  self.console.print(f"[red]Cookie for {package_name} is invalid. Skipping injection...[/red]")
+                  continue
+                
+               self.console.print(f"[green]Injecting cookie for {package_name}: {cookie}[/green]")
+                
+               # Paths to the destination directories
+               destination_db_dir = f"/data/data/{package_name}/app_webview/Default/"
+               destination_appstorage_dir = f"/data/data/{package_name}/files/appData/LocalStorage/"
+
+               # Ensure directories exist
+               os.makedirs(destination_db_dir, exist_ok=True)
+               os.makedirs(destination_appstorage_dir, exist_ok=True)
+
+               # Copy the downloaded Cookies.db to the destination
+               destination_db_path = os.path.join(destination_db_dir, "Cookies")
+               shutil.copyfile(downloaded_db_path, destination_db_path)
+               self.console.print(f"[green]Copied Cookies.db to {destination_db_path}[/green]")
+
+               # Inject the appStorage.json
+               destination_appstorage_path = os.path.join(destination_appstorage_dir, "appStorage.json")
+               shutil.copyfile(downloaded_appstorage_path, destination_appstorage_path)
+               self.console.print(f"[green]Copied appStorage.json to {destination_appstorage_path}[/green]")
+
+                # Replace the cookie value in the database
+               self.replace_cookie_value_in_db(destination_db_path, cookie)
+
+               self.console.print(f"[yellow]Verifying cookie for {package_name} after injection...")
+               if self.verify_cookie(cookie):
+                  self.console.print(f"[green]Cookie for {package_name} is valid after injection![/green]")
+               else:
+                  self.console.print(f"[red]Cookie for {package_name} is invalid after injection![/red]")
+
+         except Exception as e:
+            self.console.print(f"[red]Error injecting cookie for {package_name}: {e}[/red]")
+
+      self.console.print("[green]Cookie and appStorage injection completed for all packages.[/green]")    
+
+   def capture_screenshot(self):
+    # Get the current working directory
+    current_dir = os.getcwd()  # Get the current working directory
+    
+    # Define the screenshots directory using the absolute path
+    screenshot_dir = os.path.join(current_dir, "screenshots")
+    
+    # Ensure the directory exists
+    os.makedirs(screenshot_dir, exist_ok=True)
+    
+    # Define the full path for the screenshot using absolute path
+    screenshot_path = os.path.join(screenshot_dir, "screenshot.png")
+
+    # Check if 'screencap' command is available
+    if shutil.which("screencap") is None:
+        self.console.print("[red]screencap command not found or inaccessible.[/red]")
+        return None
+
+    # Run the screencap command
+    result = os.system(f"screencap -p {screenshot_path}")
+
+    # Check if the screenshot was successfully captured
+    if result != 0 or not os.path.exists(screenshot_path):
+        self.console.print(f"[red]Failed to capture screenshot at {screenshot_path}. Skipping this webhook.[/red]")
+        return None
+
+    return screenshot_path
+   
+   # Function to retrieve system information
+   def get_system_info(self):
+      cpu_usage = psutil.cpu_percent(interval=1)
+      memory_info = psutil.virtual_memory()
+      uptime = time.time() - psutil.boot_time()
+
+      system_info = {
+         "cpu_usage": cpu_usage,
+         "memory_total": memory_info.total,
+         "memory_available": memory_info.available,
+         "memory_used": memory_info.used,
+         "uptime": uptime
+      }
+    
+      return system_info
+   
+   # Function to load configuration from file
+   def load_config(self):
+      global webhook_url, device_name, interval
+      if os.path.exists(self.config_file):
+         with open(self.config_file, "r") as file:
+            config = json.load(file)
+            webhook_url = config.get("webhook_url")
+            device_name = config.get("device_name")
+            interval = config.get("interval")
+      else:
+         webhook_url = None
+         device_name = None
+         interval = None
+   
+   # Function to save configuration to file
+   def save_config(self):
+      config = {
+         "webhook_url": webhook_url,
+         "device_name": device_name,
+         "interval": interval
+      }
+      with open(self.config_file, "w") as file:
+         json.dump(config, file)
+
+   def start_webhook_thread(self):
+      global webhook_thread, stop_webhook_thread
+      if webhook_thread is None or not webhook_thread.is_alive():
+         stop_webhook_thread = False
+         webhook_thread = threading.Thread(target=self.send_webhook)
+         webhook_thread.start()
+		
+   def count_roblox_processes(self):
+      count = 0
+      for proc in psutil.process_iter(['name']):
+         if 'roblox' in proc.info['name'].lower():
+            count += 1
+      return count
+   
+   def remove_markup(self, text):
+      """Remove markup tags like [green]...[/green] from the text."""
+      return re.sub(r'\[.*?\]', '', text)
+
+   def get_status_icon(self, package_name):
+      """Determine the status icon based on the package status."""
+      initial_status = self.package_statuses.get(package_name, {}).get('Status', "")
+      status = self.remove_markup(initial_status)
+
+      # Online Status
+      if status == "Executor loaded successfully":
+         return "[🟢] Online"
+        
+      # Connecting Status (based on multiple matching conditions)
+      connecting_conditions = [
+         "Executor still failed after rejoin, retrying....",
+         "Executor reloaded successfully after rejoin.",
+         "Executor failed, rejoining....",
+         "Reached retry limit, stopping rejoin attempts....",
+         "Executor failed, rejoining....",
+         "Successfully joined roblox",
+         "Opening roblox...."
+      ]
+      if any(status.startswith(condition) for condition in connecting_conditions):
+            return "[🟡] Connecting"
+        
+      # Offline Status (based on multiple matching conditions)
+      offline_conditions = [
+         "Initializing......"
+      ]
+      if any(status.startswith(condition) for condition in offline_conditions):
+         return "[🔴] Offline"
+
+      # If the status doesn't match any known condition, return Unknown
+      return "[🔴] Offline"
+   
+   def get_combined_status_for_all_users(self):
+      """Generate the formatted status for each user and return as a single field."""
+      status_lines = []  # List to hold all the status lines for users
+      for package_name in self.package_statuses:
+         # Retrieve the formatted status message for the current package
+         status_message = self.get_status_icon(package_name)
+
+         # Fetch the real username and user ID from user_data
+         username = self.user_data.get(package_name, {}).get("Username", "Unknown User")
+         user_id = self.user_data.get(package_name, {}).get("UserId", "Unknown ID")
+            
+         # Format and append the status message with a link to the user's profile
+         status_lines.append(f"{status_message} -- [{username}](<https://www.roblox.com/users/{user_id}/profile>)")
+        
+      # Combine all the status lines into one string with each status on a new line
+      return "\n".join(status_lines)
+   
+   def send_webhook(self):
+      global stop_webhook_thread
+
+      while not stop_webhook_thread:
+         # Capture a screenshot
+         screenshot_path = self.capture_screenshot()
+
+         # Check if the screenshot was captured successfully
+         if not os.path.exists(screenshot_path):
+            self.console.print(f"[red]Screenshot file not found: {screenshot_path}. Skipping this webhook.[/red]")
+            continue  # Skip this iteration if the screenshot doesn't exist
+
+         # Get system information
+         system_info = self.get_system_info()
+         roblox_process_count = self.count_roblox_processes()  # Get the number of open Roblox packages
+         combined_status = self. get_combined_status_for_all_users()
+         # Prepare the embed data
+         embed = {
+            "title": f"System Info for {device_name}",
+            "color": 15258703,
+            "desciption": f"{self.create_smooth_gradient_header()}",
+            "fields": [
+               {"name": "Status", "value": f"{combined_status}", "inline": False},
+               {"name": "Device Name", "value": device_name, "inline": True},
+               {"name": "CPU Usage", "value": f"{system_info['cpu_usage']}%", "inline": True},
+               {"name": "Memory Used", "value": f"{system_info['memory_used'] / system_info['memory_total'] * 100:.2f}%", "inline": True},
+               {"name": "Memory Available", "value": f"{system_info['memory_available'] / system_info['memory_total'] * 100:.2f}%", "inline": True},
+               {"name": "Total Memory", "value": f"{system_info['memory_total'] / (1024 ** 3):.2f} GB", "inline": True},
+               {"name": "Uptime", "value": f"{system_info['uptime'] / 3600:.2f} hours", "inline": True},
+               {"name": "Open Roblox Packages", "value": f"{roblox_process_count}", "inline": True}
+            ],
+            "image": {
+                "url": "attachment://screenshot.png"
+            }
+         }
+
+         # JSON payload
+         payload = {
+            "embeds": [embed],
+            "username": device_name
+         }
+
+         try:
+            # Sending POST request to the webhook URL with the image as an attachment
+            with open(screenshot_path, "rb") as file:
+               response = requests.post(
+                  webhook_url,
+                  data={"payload_json": json.dumps(payload)},
+                  files={"file": ("screenshot.png", file)}
+               )
+
+            if response.status_code == 204 or response.status_code == 200:
+               self.console.print("[green]Webhook sent successfully![/green]")
+            else:
+               self.console.print(f"[red]Failed to send webhook, status code: {response.status_code}[/red]")
+         except Exception as e:
+            self.console.print(f"[red]Error sending webhook: {e}[/red]")
+
+         # Delete the screenshot file silently
+         try:
+            os.remove(screenshot_path)
+         except Exception as e:
+            self.console.print(f"[red]Error deleting screenshot file: {e}[/red]")
+
+         # Wait for the specified interval before sending the next webhook
+         time.sleep(interval * 60)
+
+   def stop_webhook(self):
+      global stop_webhook_thread
+      stop_webhook_thread = True
+      self.stop_event.set()  # Signal the thread to stop
+
+   # Function to prompt for webhook URL, device name, and interval
+   def setup_webhook(self):
+      global webhook_url, device_name, interval, stop_webhook_thread
+
+      stop_webhook_thread = True  # Stop any existing webhook thread
+
+      webhook_url = self.console.input("[green]Enter the Discord webhook URL: [/green]")
+      device_name = self.console.input("[green]Enter the device name: [/green]") 
+      interval = int(self.console.input("[green]Enter the interval in minutes for sending the webhook: "))
+
+      self.save_config()  # Save the configuration
+
+      stop_webhook_thread = False
+      threading.Thread(target=self.send_webhook).start() 
+    
+   def create_menu(self):
+      # Create the menu with magenta-colored numbers and default-colored text
+      menu = Text()
+      menu.append("\n1", style="magenta bold").append(". Start Auto Rejoin\n",style="cyan bold")
+      menu.append("2", style="magenta bold").append(". Start Auto Setup for all/each Packages\n",style="cyan bold")
+      menu.append("3", style="magenta bold").append(". Bypass Start(Fluxus Only)\n",style="cyan bold")
+      menu.append("4", style="magenta bold").append(". Clear Floating Rejoin User Data\n",style="cyan bold")
+      menu.append("5", style="magenta bold").append(". Show List\n",style="cyan bold")
+      menu.append("6", style="magenta bold").append(". Same HWID  Fluxus\n",style="cyan bold")
+      menu.append("7", style="magenta bold").append(". Add auto execute script\n",style="cyan bold")
+      menu.append("8", style="magenta bold").append(". Setup Webhook\n",style="cyan bold")
+      menu.append("9", style="magenta bold").append(". Auto Login via Cookie\n",style="cyan bold")
+      menu.append("10", style="magenta bold").append(". Exit\n",style="cyan bold")
+      return menu 
+
+   def display_panel_with_header(self):
+      # Print the header (logo) above the panel
+      self.print_header()
+
+      # Get the console width and height
+      width = self.console.size.width
+      height = self.console.size.height
+
+      # Determine panel width based on fixed thresholds for portrait vs landscape
+      if width > 120:  # Assume landscape mode if width > 120
+         panel_width = int(width * 0.5)
+      else:  # Assume portrait mode if width <= 120
+         panel_width = int(width * 0.85)
+
+      # Create and print the panel with the calculated width
+      panel_content = self.create_menu()
+      panel = Panel(panel_content, title="Tool Menu", width=panel_width, border_style="cyan")
+      self.console.print(panel)
+   
+   def authenticate_key(self):
+      self.console.input("[green]Press Enter to continue...[/green]")    
+      tool_key = self.load_tool_key()
+      if not tool_key:
+         tool_key = input("Please enter your tool key: ")
+         if self.validate_tool_key(tool_key):
+            self.save_tool_key(tool_key)
+         else:
+            self.console.print("[red]Invalid tool key. Please try again. Use /get_tool_key to get your key.[/red]")
+            return
+      elif not self.validate_tool_key(tool_key):
+         self.console.print("Invalid tool key. Removing saved key and exiting.")
+         os.remove(self.tool_key_file)  # Remove the invalid tool key file
+         sys.exit(0)
+        
+      # Validate the tool key again (necessary only if we loaded it from the file)
+      if self.validate_tool_key(tool_key):
+         self.console.print("[green]Tool key validated successfully.[/green]")
+      else:
+         self.console.print("[red]Invalid tool key. Removing saved key and exiting.[/red]")
+         os.remove(self.tool_key_file)  # Remove the invalid tool key file
+         sys.exit(0)
+   
+   def reset_executor_file(self, username):
+      """
+      Clears any existing executor status file for the given username.
+      This ensures a fresh start each time Roblox is launched, only in a valid Workspace path (lowercase or uppercase).
+      """
+      status_file = f"executor_check_{username}.txt"
+      valid_workspace = None  # Will store the valid workspace path once detected
+
+      # Search only in Workspace paths (uppercase 'W' and lowercase 'w')
+      for executor, base_path in self.executors.items():
+         for workspace_dir in ["workspace", "Workspace"]:
+            workspace_path = os.path.join(base_path, workspace_dir)
+            if os.path.exists(workspace_path):
+               valid_workspace = workspace_path
+               break  # Exit the loop once a valid workspace is found
+
+         if valid_workspace:
+            # Clear the status file in the detected workspace
+            file_path = os.path.join(valid_workspace, status_file)
+            if os.path.exists(file_path):
+               try:
+                  os.remove(file_path)  # Clear the status file for a fresh start
+                  # The print statements have been removed as intended
+               except Exception as e:
+                  pass  # Ignore the error silently
+            break  # Exit the executor loop once the file is removed
+   
+   def press_enter_to_continue(self):
+      self.console.input("Press Enter to continue...")
+      self.clear_screen()
+        
+def main():
+   roblox_manager = RobloxManager()
+   
+   # Clear screen and print header
+   roblox_manager.clear_screen()
+   roblox_manager.print_header()
+   
+   # Authenticate key
+   roblox_manager.authenticate_key()
+   
+   # Clear screen again after authentication
+   roblox_manager.clear_screen()
+   
+   # Load configuration before the main menu
+   if not roblox_manager.load_config_from_json():
+       roblox_manager.console.print("[red]Failed to load config from JSON. Please ensure your configuration is set up.[/red]")
+       return  # Stop execution if the config fails to load
+   
+   console = roblox_manager.console
+   package_statuses = roblox_manager.package_statuses
+   
+   try:
+      while True:
+         # Display the main menu
+         roblox_manager.display_panel_with_header()
+
+         # Get the user's menu choice
+         setup_type = console.input("[magenta]Enter choice: [/magenta]")
+         
+         if setup_type == "1":
+            # Handle option 1 (start auto rejoin)
+            try:
+               force_rejoin_interval = int(roblox_manager.console.input("Enter the force rejoin/kill Roblox interval in minutes: ")) * 60
+               if force_rejoin_interval <= 0:
+                  raise ValueError("The interval must be a positive integer.")
+            except ValueError as ve:
+               console.print(f"[red]Invalid input: {ve}. Please enter a valid interval in minutes.[/red]")
+               console.input("[green]Press Enter to return to the menu...[/green]")
+               continue
+            
+            if roblox_manager.webhook_url and device_name and interval:
+               if webhook_thread is None or not webhook_thread.is_alive():
+                  roblox_manager.start_webhook_thread()
+
+            roblox_manager.initialize_data_for_table()
+
+            roblox_manager.kill_roblox_processes()
+
+            user_data = roblox_manager.user_data
+            num_packages = len(user_data)
+
+            for package_name in roblox_manager.installed_roblox_packages:
+               try:
+                  if package_name in user_data:
+                     server_link = user_data[package_name]['server_link']
+                     package_statuses[package_name]["Status"] = "[orange]Launching[/orange]"
+                     roblox_manager.display_status_table()
+                     roblox_manager.launch_roblox(package_name, server_link, num_packages)
+                     package_statuses[package_name]["Status"] = "[green]Joined[/green]"
+                     roblox_manager.display_status_table()
+
+                     # Get the username for the executor check
+                     username = user_data[package_name]['Username']
+
+                     # Reset the executor file before checking
+                     roblox_manager.reset_executor_file(username)
+
+                     # Ensure the tool waits for the executor to load before proceeding to the next package
+                  while True:
+                     if roblox_manager.check_executor_status(username, continuous=False):
+                        package_statuses[package_name]["Status"] = "[green]Executor loaded successfully[/green]"
+                        roblox_manager.display_status_table()
+                        break  # Break the loop and proceed to the next package
+
+                     # If the executor failed to load within 2 minutes, rejoin and retry
+                     else:
+                        console.print(f"Executor did not load for {package_name} (username: {username}). Rejoining...")
+                        package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining...[/red]"
+                        roblox_manager.display_status_table()
+                        roblox_manager.kill_roblox_process(package_name)
+                        time.sleep(2)
+                        roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+               except Exception as e:
+                  console.print(f"[red]Error launching Roblox for {package_name}: {e}[/red]")
+                  package_statuses[package_name]["Status"] = "[red]Launch failed[/red]"
+                  roblox_manager.display_status_table()
+
+            start_time = time.time()
+
+            while True:
+               current_time = time.time()
+               try:
+                  for package_name in roblox_manager.installed_roblox_packages:
+                     try:
+                        # Retrieve the correct server_link for the package_name
+                        server_link = user_data[package_name]['server_link']
+                        if not server_link:
+                           package_statuses[package_name]["Status"] = "[red]Server link not found[/red]"
+                           roblox_manager.display_status_table()
+                           continue
+                        
+                        # Get the username associated with the user ID or fallback to user ID
+                        username = user_data[package_name]['Username']
+                        user_id = user_data[package_name]['UserId']
+                        presence_type, last_location_current = roblox_manager.check_user_online(user_id)
+
+                        if presence_type == 2:
+                           package_statuses[package_name]["Status"] = "[green]In-Game[/green]"
+
+                           if not roblox_manager.check_executor_status(username, continuous=False):  # If executor isn't detected as working
+                              console.print(f"Executor did not update for {package_name} (username: {username}). Rejoining...")
+                              package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining...[/red]"
+                              roblox_manager.display_status_table()
+                              roblox_manager.kill_roblox_process(package_name)
+                              time.sleep(2)
+                              roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                        else:
+                           if not roblox_manager.is_roblox_running(package_name):
+                              package_statuses[package_name]["Status"] = "[red]Process Crashed, Relaunching[/red]"
+                              roblox_manager.kill_roblox_process(package_name)
+                              time.sleep(2)
+                              roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                              # Check executor status after relaunch
+                              if not roblox_manager.check_executor_status(username, continuous=False):
+                                 console.print(f"Executor did not load for {package_name} (username: {username}) after relaunch. Rejoining...")
+                                 package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining...[/red]"
+                                 roblox_manager.kill_roblox_process(package_name)
+                                 time.sleep(2)
+                                 roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                           else:
+                              if last_location_current == "Website":
+                                 package_statuses[package_name]["Status"] = "[red]On Website, Rejoining[/red]"
+                                 roblox_manager.kill_roblox_process(package_name)
+                                 time.sleep(2)
+                                 roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                                 # Check executor status after relaunch
+                                 if not roblox_manager.check_executor_status(username, continuous=False):
+                                    console.print(f"Executor did not load for {package_name} (username: {username}) after relaunch. Rejoining...")
+                                    package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining...[/red]"
+                                    roblox_manager.display_status_table()
+                                    roblox_manager.kill_roblox_process(package_name)
+                                    time.sleep(2)
+                                    roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                                    # If executor loaded successfully after relaunch
+                                 else:
+                                    package_statuses[package_name]["Status"] = "[green]Executor loaded successfully after rejoin[/green]"
+                                    roblox_manager.display_status_table()
+                              else:
+                                 package_statuses[package_name]["Status"] = "[red]Not In-Game, Recently Active[/red]"
+
+                        roblox_manager.display_status_table()
+                        time.sleep(25)  # Adjust the delay time as needed
+
+                     except Exception as e:
+                        console.print(f"[red]Error during rejoin process for {package_name}: {e}[/red]")
+                        package_statuses[package_name]["Status"] = "[red]General error[/red]"
+                        roblox_manager.display_status_table()
+
+                  if current_time - start_time >= force_rejoin_interval:
+                     console.print("Force killing Roblox processes due to time limit.")
+                     roblox_manager.kill_roblox_processes()
+                     start_time = current_time
+                     console.print("[yellow]Waiting for 5 seconds before starting the rejoin process...[/yellow]")
+                     time.sleep(5)
+                     for package_name in roblox_manager.installed_roblox_packages:
+                        server_link = user_data[package_name]['server_link']
+                        username = user_data[package_name]['Username']
+                        try:
+                           package_statuses[package_name]["Status"] = "[red]Rejoining[/red]"
+                           roblox_manager.display_status_table()
+                           roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                           # Check executor status after relaunch
+                           if not roblox_manager.check_executor_status(username, continuous=False):
+                              print(f"Executor did not load for {package_name} (username: {username}) after rejoin. Rejoining...")
+                              package_statuses[package_name]["Status"] = "[red]Executor failed, rejoining...[/red]"
+                              roblox_manager.kill_roblox_process(package_name)
+                              time.sleep(2)
+                              roblox_manager.launch_roblox(package_name, server_link, num_packages)
+
+                           package_statuses[package_name]["Status"] = "[green]Joined[/green]"
+                        except Exception as e:
+                           print(f"Error rejoining Roblox for {package_name}: {e}")
+
+                     roblox_manager.display_status_table()
+
+                  time.sleep(90)
+
+               except Exception as e:
+                  console.print(f"[red]Critical error in auto rejoin loop: {e}[/red]")
+                  time.sleep(60)
+                  continue
+
+         elif setup_type == "2":
+            roblox_manager.manage_packages()
+         elif setup_type == "3":
+            roblox_manager.auto_fluxus_bypass()  # Perform the bypass for all packages
+            roblox_manager.console.print("[cyan]Starting the auto rejoin process immediately after bypass...[/cyan]")
+
+            roblox_manager.kill_roblox_processes()  # Ensure all Roblox processes are terminated
+            roblox_manager.load_config_from_json()  # Load configuration from JSON file
+
+            user_data = roblox_manager.user_data
+            num_packages = len(user_data)
+
+            for package_name in roblox_manager.installed_roblox_packages:
+               try:
+                   if package_name in user_data:
+                       server_link = user_data[package_name]['server_link']
+                       roblox_manager.launch_roblox(package_name, server_link, num_packages)
+                       roblox_manager.console.print(f"[green]Rejoined Roblox for package: {package_name}[/green]")
+               except Exception as e:
+                   roblox_manager.console.print(f"[red]Error rejoining for package {package_name}: {e}[/red]")        
+         elif setup_type == "4":
+           if roblox_manager.clear_json_file(roblox_manager.json_file_path) and roblox_manager.clear_json_file(roblox_manager.hwid_path):
+               console.print("[green]Data cleared, please setup again to continue using the rejoin tool[/green]")
+               roblox_manager.press_enter_to_continue()
+           else:
+               console.print("[red]Failed to clear data[/red]")
+               roblox_manager.press_enter_to_continue()
+         elif setup_type == "5":
+            roblox_manager.display_configuration()
+            roblox_manager.press_enter_to_continue()
+         elif setup_type == "6":
+            new_hwid = console.input("Enter the new HWID you want to set for all Fluxus packages: ")
+
+            # Fetch the Fluxus packages
+            packages = roblox_manager.installed_roblox_packages
+
+            # Iterate over each package and update the HWID
+            for package_name in packages:
+               hwid_file_path = roblox_manager.get_hwid_file_path(package_name)
+               if hwid_file_path:
+                  try:
+                     with open(hwid_file_path, "w") as file:
+                        file.write(new_hwid)
+                        console.print(f"[green]HWID for {package_name} successfully updated to {new_hwid}[/green]")
+                  except Exception as e:
+                     console.print(f"[red]Error updating HWID for {package_name}: {e}[/red]")
+               else:
+                  print(f"[red]Failed to find HWID file for {package_name}. Skipping.[/red]")
+
+            console.input("\n[green]Press Enter to return to the menu...[/green]")
+         elif setup_type == "7":
+            console.print("connection 404")
+            roblox_manager.press_enter_to_continue()
+         elif setup_type == "8":
+            roblox_manager.setup_webhook()
+         elif setup_type == "9":
+            roblox_manager.inject_cookies_and_appstorage()
+            roblox_manager.press_enter_to_continue()
+         elif setup_type == "10":
+            global stop_webhook_thread
+            roblox_manager.stop_webhook_thread = True
+            break
+   except KeyboardInterrupt:
+      # Catching KeyboardInterrupt and handling it gracefully
+      roblox_manager.console.print("[red]Operation interrupted. Exiting gracefully...[/red]")
+      sys.exit(0)  # Exit the program with status 0 (normal exit)
+   except Exception as e:
+      # Catching other unexpected errors
+      roblox_manager.console.print(f"[red]An error occurred: {str(e)}[/red]")
+      roblox_manager.console.print("[red]Exiting due to an unexpected error.[/red]")
+      sys.exit(1)  # Exit the program with a non-zero status to indicate failure
+               
+if __name__ == "__main__":
+    main()           

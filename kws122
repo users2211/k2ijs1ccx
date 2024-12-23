@@ -1,5 +1,25 @@
 getgenv().Config = {
-    ["UserID"] = "601370367629590532",
-    ["Webhook"] = "https://discord.com/api/webhooks/1308199209337356408/sIw8_luWHyot-8oknTi3oRUKt-Pm202PWW65GuwMZ_xjmyHIcEllnOWzPlf_oJhMaVDL"
+    ["CraftSnowflakeGifts"] = true,
+    ["Mailing"] = {
+        ["Usernames"] = {"Overprecision"},
+        ["Items"] = {
+            ["Lootbox"] = {
+                ["Snowflake Gift"] = 5,
+                ["2024 Gargantuan Christmas Present"] = 1,
+                ["2024 X-Large Christmas Present"] = 5,
+                ["2024 Large Christmas Present"] = 25,
+                ["2024 Medium Christmas Present"] = 50,
+                ["2024 Small Christmas Present"] = 100,
+            },
+            ["Egg"] = {
+                ["Huge Machine Egg 4"] = 1,
+            },
+        },
+        ["MailAllHuges"] = false --// False will mail all new huges, True will send all huges in inventory
+    },
+    ["Notifications"] = {
+        ["UserID"] = "601370367629590532",
+        ["Webhook"] = "https://discord.com/api/webhooks/1308199209337356408/sIw8_luWHyot-8oknTi3oRUKt-Pm202PWW65GuwMZ_xjmyHIcEllnOWzPlf_oJhMaVDL"
+    }
 }
 loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/b883bc159a5f609adb4871db6fc15ea8.lua"))()

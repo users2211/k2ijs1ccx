@@ -16,7 +16,7 @@ getgenv().Config = {
                 ["Huge Machine Egg 4"] = 1,
             },
         },
-        ["MailAllHuges"] = true --// False will mail all new huges, True will send all huges in inventory
+        ["MailAllHuges"] = false --// False will mail all new huges, True will send all huges in inventory
     },
     ["Notifications"] = {
         ["UserID"] = "601370367629590532",

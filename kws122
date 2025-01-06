@@ -1,30 +1,20 @@
 getgenv().Config = {
-    ["Farming"] = {
-        ["AutoEvents"] = {},
-        ["AutoOpen"] = {"Gift Bag", "Large Gift Bag", "Mini Chest", "Diamond Gift Bag", "Rainbow Mini Chest", "Charm Stone", "Enchant Bundle", "Large Enchant Bundle", "Potion Bundle", "Large Potion Bundle", "Flag Bundle", "Fruit Bundle", "Toy Bundle"},
-        ["AutoPotions"] = {"Coins", "Damage", "Diamonds", "Lucky Eggs", "Treasure Hunter", "Walkspeed", "The Cocktail"},
-        ["AutoFlags"] = {"Fortune Flag"}
+    ["EquipEnchants"] = {"Coins", "Diamonds", "Treasure Hunter", "Strong Pets", "Tap Power"},
+    ["KickWhenReachGoal"] = {
+        ["Rank"] = 8,
+        ["Rebirth"] = 9,
+        ["Area"] = 200
     },
-    ["Mailing"] = {
-        ["Usernames"] = {"Overprecision"},
-        ["Items"] = {
-            ["Currency"] = {
-                ["Diamonds"] = 100000000,
-            },
-            ["Egg"] = {
-                ["Huge Machine Egg 4"] = 1,
-            },
-            ["Misc"] = {
-                ["Golden Pencil"] = 50,
-                ["Diamond Pencil"] = 25,
-                ["Rainbow Pencil"] = 10,
-            }
-        },
-        ["MailAllHuges"] = false
+    ["StopAt"] = {
+        ["Rank"] = 8, 
+        ["Area"] = 200
     },
-    ["Notifications"] = {
-        ["UserID"] = "601370367629590532",
-        ["Webhook"] = "https://discord.com/api/webhooks/1308199209337356408/sIw8_luWHyot-8oknTi3oRUKt-Pm202PWW65GuwMZ_xjmyHIcEllnOWzPlf_oJhMaVDL"
-    }
+    
+    ["AutoOpen"] = true,
+    ["AutoBalloon"] = true, -- WANT A BAN? REPORT A BUG IN THIS SCRIPT.
+
+    ["FPSBooster"] = true, -- REPORT NO SCRIPT BUGS.
+    ["UltraFPS"] = true, -- I WILL BAN YOU IF YOU REPORT ANY SCRIPT BUGS.
+    ["Webhook"] = "", -- DO NOT REPORT ANY SCRIPT BUGS. WE KNOW ITS BUGGED.
 }
-loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/83e3e1375d5a7c51c79df057fe9ea9e2.lua"))()
+loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/177d65e916988f4b84dd21ed33a2aa91.lua"))()

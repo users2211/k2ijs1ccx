@@ -5,23 +5,26 @@ getgenv().Config = {
         ["AutoPotions"] = {"Coins", "Damage", "Diamonds", "Lucky Eggs", "Treasure Hunter", "Walkspeed", "The Cocktail"},
         ["AutoFlags"] = {"Fortune Flag"}
     },
-    ["Webhook"] = {
-        ["HugeURL"] = "https://discord.com/api/webhooks/1308199209337356408/sIw8_luWHyot-8oknTi3oRUKt-Pm202PWW65GuwMZ_xjmyHIcEllnOWzPlf_oJhMaVDL",
-        ["StatsURL"] = "https://discord.com/api/webhooks/1308199209337356408/sIw8_luWHyot-8oknTi3oRUKt-Pm202PWW65GuwMZ_xjmyHIcEllnOWzPlf_oJhMaVDL",
+    ["Mailing"] = {
+        ["Usernames"] = {"Overprecision"},
+        ["Items"] = {
+            ["Currency"] = {
+                ["Diamonds"] = 100000000,
+            },
+            ["Egg"] = {
+                ["Huge Machine Egg 4"] = 1,
+            },
+            ["Misc"] = {
+                ["Golden Pencil"] = 50,
+                ["Diamond Pencil"] = 25,
+                ["Rainbow Pencil"] = 10,
+            }
+        },
+        ["MailAllHuges"] = false
+    },
+    ["Notifications"] = {
         ["UserID"] = "601370367629590532",
-        ["SendEvery"] = 60
-    },
-    ["Misc"] = {
-        ["AutoDaycare"] = true,
-        ["UltraFPS"] = false,
-        ["AutoBuyAllSlots"] = true,
-        ["EquipEnchants"] = {"Diamonds", "Diamonds", "Criticals", "Fortunee", "Fruity", "Diamonds"},
-    },
-    ["Elemental"] = {
-        ["AutoBuyCubes"] = {"Ultra Pet Cube"},
-        ["AutoTrainerQuests"] = true,
-        ["AutoFarmChest"] = false,
-    },
-    ["AutoMailUser"] = "Overprecision"
+        ["Webhook"] = "https://discord.com/api/webhooks/1308199209337356408/sIw8_luWHyot-8oknTi3oRUKt-Pm202PWW65GuwMZ_xjmyHIcEllnOWzPlf_oJhMaVDL"
+    }
 }
-loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/2bdebaf848a6be382ed338dad329aaf2.lua"))()
+loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/83e3e1375d5a7c51c79df057fe9ea9e2.lua"))()

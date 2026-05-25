@@ -1,4 +1,13 @@
 -- ============================================
+-- AUTO CRAFTER v2.2 (With Username Display)
+-- ============================================
+
+-- EDIT THESE VALUES
+local WEBHOOK_URL = ""  -- Put your Discord webhook here (leave empty to disable)
+local ANTI_AFK_ENABLED = true
+local BATCH_SIZE = 3
+
+-- ============================================
 
 local TIERS = {
     [1] = { name = "CoinsPotion1", gems = 25, time = 5, label = "T1", requiredForNext = 3 },

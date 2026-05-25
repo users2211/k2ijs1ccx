@@ -1,111 +1,118 @@
 -- ============================================
--- AUTO CRAFTER v3.0 (with Brewing Queue Timer)
+-- AUTO CRAFTER v5.2 (Working + Total Gems Needed)
 -- ============================================
 
--- EDIT THESE VALUES
-local WEBHOOK_URL = ""  -- Put your Discord webhook here
+local WEBHOOK_URL = "webhook"
 local ANTI_AFK_ENABLED = true
-local BATCH_SIZE = 3
+local TARGET_T5 = 3
 
+-- ============================================
+-- SERVICES
+-- ============================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- ============================================
+-- FIND REMOTES
+-- ============================================
+
+local CraftPotion = nil
+local UpdateCraftQueue = nil
+local PotionCrafted = nil
+
+for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+    if obj.Name == "CraftPotion" and obj:IsA("RemoteFunction") then
+        CraftPotion = obj
+    elseif obj.Name == "UpdateCraftQueue" and obj:IsA("RemoteEvent") then
+        UpdateCraftQueue = obj
+    elseif obj.Name == "PotionCrafted" and obj:IsA("RemoteEvent") then
+        PotionCrafted = obj
+    end
+end
+
+print("[Remotes] CraftPotion:", CraftPotion ~= nil)
+print("[Remotes] UpdateCraftQueue:", UpdateCraftQueue ~= nil)
+print("[Remotes] PotionCrafted:", PotionCrafted ~= nil)
+
+-- ============================================
+-- DATA
 -- ============================================
 
 local TIERS = {
-    [1] = { name = "CoinsPotion1", gems = 25, time = 5, label = "T1", requiredForNext = 3 },
-    [2] = { name = "CoinsPotion2", gems = 50, time = 60, label = "T2", requiredForNext = 3 },
-    [3] = { name = "CoinsPotion3", gems = 75, time = 420, label = "T3", requiredForNext = 3 },
-    [4] = { name = "CoinsPotion4", gems = 100, time = 1800, label = "T4", requiredForNext = 3 },
-    [5] = { name = "CoinsPotion5", gems = 250, time = 7200, label = "T5", requiredForNext = 0 },
+    T1 = "CoinsPotion1",
+    T2 = "CoinsPotion2",
+    T3 = "CoinsPotion3",
+    T4 = "CoinsPotion4",
+    T5 = "CoinsPotion5",
 }
 
-local CRAFTING_SLOTS = 3
-_G.AutoBrew = false
+local POTION_TO_TIER = {
+    ["CoinsPotion1"] = "T1",
+    ["CoinsPotion2"] = "T2",
+    ["CoinsPotion3"] = "T3",
+    ["CoinsPotion4"] = "T4",
+    ["CoinsPotion5"] = "T5",
+}
+
+-- Gem cost per potion
+local GEM_COST = {
+    T1 = 25,
+    T2 = 50,
+    T3 = 75,
+    T4 = 100,
+    T5 = 250,
+}
+
+-- ============================================
+-- STATE
+-- ============================================
+
+local running = false
 local totalT5Crafted = 0
-local currentCraftingTier = "Idle"
-local currentUsername = game.Players.LocalPlayer.Name
 
--- Brewing queue tracking
-local activeBrews = { slot1 = nil, slot2 = nil, slot3 = nil }
-local POTION_NAMES = {
-    CoinsPotion1 = "T1",
-    CoinsPotion2 = "T2",
-    CoinsPotion3 = "T3",
-    CoinsPotion4 = "T4",
-    CoinsPotion5 = "T5",
-}
+local activeBrews = { nil, nil, nil }
+local pendingQueue = {}
 
--- Format time as MM:SS
+-- ============================================
+-- HELPERS
+-- ============================================
+
 local function formatTime(seconds)
-    if seconds < 0 then return "0:00" end
+    if seconds <= 0 then return "0:00" end
     local mins = math.floor(seconds / 60)
     local secs = seconds % 60
     return string.format("%d:%02d", mins, secs)
 end
 
--- ============================================
--- WEBHOOK FUNCTION
--- ============================================
-
-local function sendWebhook(t5Count)
-    if WEBHOOK_URL == "" then return end
-    
-    local player = game.Players.LocalPlayer
-    local username = player.Name
-    local userId = player.UserId
-    local gems = getGems()
-    local counts = getPotionCounts()
-    
-    local data = {
-        ["embeds"] = {{
-            ["title"] = "🧪 T5 Potion Crafted!",
-            ["color"] = 0x00ff00,
-            ["fields"] = {
-                { name = "👤 Username", value = username, inline = true },
-                { name = "🆔 User ID", value = tostring(userId), inline = true },
-                { name = "🎯 T5 Count", value = tostring(t5Count), inline = true },
-                { name = "💎 Gems Remaining", value = tostring(gems), inline = true },
-                { name = "📦 Inventory", value = string.format("T1:%d T2:%d T3:%d T4:%d", counts.T1, counts.T2, counts.T3, counts.T4), inline = false },
-            },
-            ["footer"] = { text = "Auto Crafter v3.0" },
-            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
-        }}
-    }
-    
-    pcall(function()
-        local req = syn and syn.request or request or http_request
-        if req then
-            req({
-                Url = WEBHOOK_URL,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = game:GetService("HttpService"):JSONEncode(data)
-            })
-        end
-    end)
+local function formatNumber(num)
+    if num >= 1000000 then
+        return string.format("%.1fM", num / 1000000)
+    elseif num >= 1000 then
+        return string.format("%.1fK", num / 1000)
+    end
+    return tostring(num)
 end
-
--- ============================================
--- INVENTORY FUNCTIONS
--- ============================================
 
 local function getPotionCounts()
     local counts = { T1 = 0, T2 = 0, T3 = 0, T4 = 0, T5 = 0 }
-    local player = game.Players.LocalPlayer
-    local potionsFolder = player:FindFirstChild("Potions")
-    
-    if potionsFolder then
-        for _, child in ipairs(potionsFolder:GetChildren()) do
-            local name = child.Name
-            local value = child.Value or 0
-            if name == "CoinsPotion1" then
-                counts.T1 = value
-            elseif name == "CoinsPotion2" then
-                counts.T2 = value
-            elseif name == "CoinsPotion3" then
-                counts.T3 = value
-            elseif name == "CoinsPotion4" then
-                counts.T4 = value
-            elseif name == "CoinsPotion5" then
-                counts.T5 = value
+    local potions = LocalPlayer:FindFirstChild("Potions")
+    if potions then
+        for _, child in ipairs(potions:GetChildren()) do
+            if child.Name == "CoinsPotion1" then
+                counts.T1 = child.Value
+            elseif child.Name == "CoinsPotion2" then
+                counts.T2 = child.Value
+            elseif child.Name == "CoinsPotion3" then
+                counts.T3 = child.Value
+            elseif child.Name == "CoinsPotion4" then
+                counts.T4 = child.Value
+            elseif child.Name == "CoinsPotion5" then
+                counts.T5 = child.Value
             end
         end
     end
@@ -113,114 +120,187 @@ local function getPotionCounts()
 end
 
 local function getGems()
-    local player = game.Players.LocalPlayer
-    local gems = player:FindFirstChild("Gems")
+    local gems = LocalPlayer:FindFirstChild("Gems")
     return gems and gems.Value or 0
-end
-
-local function getCraftPotion()
-    local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
-    local functions = remotes and remotes:FindFirstChild("Functions")
-    return functions and functions:FindFirstChild("CraftPotion")
-end
-
--- ============================================
--- BREWING QUEUE DETECTION (Remote + Continuous Timer)
--- ============================================
-
--- Find the UpdateCraftQueue remote
-local UpdateCraftQueue = nil
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-    if obj.Name == "UpdateCraftQueue" and obj:IsA("RemoteEvent") then
-        UpdateCraftQueue = obj
-        break
-    end
-end
-
--- Listen for queue updates from server
-if UpdateCraftQueue then
-    UpdateCraftQueue.OnClientEvent:Connect(function(queueData)
-        local now = os.time()
-        
-        if type(queueData) == "table" then
-            for slotNumber = 1, 3 do
-                local slot = queueData[slotNumber]
-                if type(slot) == "table" then
-                    local potionName = slot.Name
-                    local endTime = slot.EndTime
-                    
-                    if potionName and endTime then
-                        local tier = POTION_NAMES[potionName] or potionName
-                        activeBrews["slot" .. slotNumber] = {
-                            tier = tier,
-                            endTime = endTime
-                        }
-                    else
-                        activeBrews["slot" .. slotNumber] = nil
-                    end
-                else
-                    activeBrews["slot" .. slotNumber] = nil
-                end
-            end
-        end
-    end)
-end
-
--- Also listen for potion completions
-local PotionCrafted = nil
-for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-    if obj.Name == "PotionCrafted" and obj:IsA("RemoteEvent") then
-        PotionCrafted = obj
-        break
-    end
-end
-
-if PotionCrafted then
-    PotionCrafted.OnClientEvent:Connect(function(potionName, slot)
-        local tier = POTION_NAMES[potionName] or potionName
-        print(string.format("✅ [COMPLETE] %s finished in slot %s", tier, tostring(slot)))
-        -- Clear the slot
-        activeBrews["slot" .. tostring(slot)] = nil
-    end)
 end
 
 -- ============================================
 -- CORRECT BACKWARD CALCULATION
 -- ============================================
 
-local function calculateMissingBackwards(targetT5)
+local function calculateMissing(targetT5)
     local current = getPotionCounts()
     
     local needT5 = math.max(0, targetT5 - current.T5)
-    local needT4 = math.max(0, (targetT5 * 3) - current.T4)
+    local needT4 = math.max(0, (needT5 * 3) - current.T4)
     local needT3 = math.max(0, (needT4 * 3) - current.T3)
     local needT2 = math.max(0, (needT3 * 3) - current.T2)
     local needT1 = math.max(0, (needT2 * 3) - current.T1)
     
-    return {
-        T1 = needT1,
-        T2 = needT2,
-        T3 = needT3,
-        T4 = needT4,
-        T5 = needT5,
-    }
+    return { T1 = needT1, T2 = needT2, T3 = needT3, T4 = needT4, T5 = needT5 }
+end
+
+-- ============================================
+-- TOTAL GEMS NEEDED (NEW!)
+-- ============================================
+
+local function calculateTotalGemsNeeded()
+    local missing = calculateMissing(TARGET_T5)
+    local total = 0
+    total = total + (missing.T1 * GEM_COST.T1)
+    total = total + (missing.T2 * GEM_COST.T2)
+    total = total + (missing.T3 * GEM_COST.T3)
+    total = total + (missing.T4 * GEM_COST.T4)
+    total = total + (missing.T5 * GEM_COST.T5)
+    return total
+end
+
+-- ============================================
+-- REFILL QUEUE
+-- ============================================
+
+local function refreshQueue()
+    local missing = calculateMissing(TARGET_T5)
+    pendingQueue = {}
+    
+    for i = 1, missing.T1 do table.insert(pendingQueue, "T1") end
+    for i = 1, missing.T2 do table.insert(pendingQueue, "T2") end
+    for i = 1, missing.T3 do table.insert(pendingQueue, "T3") end
+    for i = 1, missing.T4 do table.insert(pendingQueue, "T4") end
+    
+    return missing
+end
+
+local function getFreeSlots()
+    local free = {}
+    for i = 1, 3 do
+        if not activeBrews[i] then
+            table.insert(free, i)
+        end
+    end
+    return free
+end
+
+local function brewNext()
+    if #pendingQueue == 0 then
+        refreshQueue()
+    end
+    
+    if #pendingQueue == 0 then
+        return false
+    end
+    
+    local freeSlots = getFreeSlots()
+    if #freeSlots == 0 then
+        return false
+    end
+    
+    local nextTier = table.remove(pendingQueue, 1)
+    local remoteName = TIERS[nextTier]
+    
+    if CraftPotion and remoteName then
+        local success = pcall(function()
+            CraftPotion:InvokeServer(remoteName)
+        end)
+        
+        if success then
+            print("[Brew] Started:", nextTier, "- Remaining:", #pendingQueue)
+            return true
+        end
+    end
+    return false
+end
+
+-- ============================================
+-- REMOTE LISTENERS
+-- ============================================
+
+if UpdateCraftQueue then
+    UpdateCraftQueue.OnClientEvent:Connect(function(queueData)
+        if type(queueData) == "table" then
+            for i = 1, 3 do
+                local slot = queueData[i]
+                if type(slot) == "table" and slot.Name and slot.EndTime then
+                    activeBrews[i] = {
+                        tier = POTION_TO_TIER[slot.Name] or slot.Name,
+                        endTime = slot.EndTime
+                    }
+                else
+                    activeBrews[i] = nil
+                end
+            end
+        end
+        
+        for i = 1, 3 do
+            if not activeBrews[i] then
+                brewNext()
+                task.wait(0.2)
+            end
+        end
+    end)
+end
+
+if PotionCrafted then
+    PotionCrafted.OnClientEvent:Connect(function(potionName, slot)
+        local tier = POTION_TO_TIER[potionName] or potionName
+        print("[Complete]", tier, "finished in slot", slot)
+        
+        activeBrews[slot] = nil
+        
+        if tier == "T5" then
+            totalT5Crafted = totalT5Crafted + 1
+            print("[T5] Total crafted:", totalT5Crafted)
+            
+            if WEBHOOK_URL ~= "" then
+                local counts = getPotionCounts()
+                local data = {
+                    embeds = {{
+                        title = "🧪 T5 Crafted!",
+                        color = 65280,
+                        fields = {
+                            { name = "Player", value = LocalPlayer.Name, inline = true },
+                            { name = "Total T5", value = tostring(totalT5Crafted), inline = true },
+                            { name = "Gems", value = tostring(getGems()), inline = true },
+                            { name = "Inventory", value = string.format("T1:%d T2:%d T3:%d T4:%d", counts.T1, counts.T2, counts.T3, counts.T4) }
+                        }
+                    }}
+                }
+                pcall(function()
+                    local req = syn and syn.request or request or http_request
+                    if req then
+                        req({ Url = WEBHOOK_URL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(data) })
+                    end
+                end)
+            end
+        end
+        
+        task.wait(0.2)
+        brewNext()
+    end)
+end
+
+-- ============================================
+-- ANTI AFK
+-- ============================================
+
+if ANTI_AFK_ENABLED then
+    local VirtualUser = game:GetService("VirtualUser")
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+    print("[Anti-AFK] Enabled")
 end
 
 -- ============================================
 -- BLACK SCREEN
 -- ============================================
 
-print("[Setup] Disabling 3D rendering...")
-
 pcall(function()
-    local lighting = game:GetService("Lighting")
-    lighting.Ambient = Color3.new(0, 0, 0)
-    lighting.Brightness = 0
-    lighting.ClockTime = 0
-    lighting.FogEnd = 0
-    lighting.GlobalShadows = false
-    lighting.OutdoorAmbient = Color3.new(0, 0, 0)
+    game:GetService("Lighting").Ambient = Color3.new(0, 0, 0)
+    game:GetService("Lighting").Brightness = 0
+    game:GetService("Lighting").ClockTime = 0
+    settings().Rendering.QualityLevel = 1
 end)
 
 local blackScreen = Instance.new("ScreenGui")
@@ -235,480 +315,310 @@ blackFrame.BackgroundTransparency = 0
 blackFrame.BorderSizePixel = 0
 blackFrame.Parent = blackScreen
 
-pcall(function() blackScreen.Parent = game:GetService("CoreGui") end)
+pcall(function() blackScreen.Parent = CoreGui end)
 if not blackScreen.Parent then
-    pcall(function() blackScreen.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui") end)
+    pcall(function() blackScreen.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
 end
 
-pcall(function()
-    settings().Rendering.QualityLevel = 1
-end)
-
 -- ============================================
--- STATUS GUI (with Brewing Queue Timer)
+-- CENTERED GUI (with Total Gems Needed)
 -- ============================================
 
-local guiFrame = Drawing.new("Square")
-guiFrame.Visible = true
-guiFrame.Filled = true
-guiFrame.Color = Color3.fromRGB(20, 20, 30)
-guiFrame.Transparency = 0.85
-guiFrame.Size = Vector2.new(340, 460)
-guiFrame.Position = Vector2.new(10, 10)
+local function getCenter()
+    local cam = Workspace.CurrentCamera
+    return cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2
+end
 
-local titleText = Drawing.new("Text")
-titleText.Visible = true
-titleText.Text = "⚡ AUTO CRAFTER v3.0"
-titleText.Color = Color3.fromRGB(255, 200, 100)
-titleText.Size = 16
-titleText.Position = Vector2.new(18, 18)
+local centerX, _ = getCenter()
 
--- Username display
-local usernameText = Drawing.new("Text")
-usernameText.Visible = true
-usernameText.Text = string.format("👤 Account: %s", currentUsername)
-usernameText.Color = Color3.fromRGB(150, 200, 255)
-usernameText.Size = 11
-usernameText.Position = Vector2.new(18, 38)
+local guiBg = Drawing.new("Square")
+guiBg.Visible = true
+guiBg.Filled = true
+guiBg.Color = Color3.fromRGB(20, 20, 35)
+guiBg.Transparency = 0.1
+guiBg.Size = Vector2.new(440, 550)
+guiBg.Position = Vector2.new(centerX - 220, 30)
+
+local title = Drawing.new("Text")
+title.Visible = true
+title.Text = "⚡ AUTO CRAFTER v5.2"
+title.Color = Color3.fromRGB(255, 200, 100)
+title.Size = 18
+title.Center = true
+title.Position = Vector2.new(centerX, 60)
 
 local statusDot = Drawing.new("Circle")
 statusDot.Visible = true
 statusDot.Filled = true
-statusDot.Radius = 6
-statusDot.Color = Color3.fromRGB(255, 0, 0)
-statusDot.Position = Vector2.new(310, 22)
+statusDot.Radius = 7
+statusDot.Position = Vector2.new(centerX - 50, 95)
 
 local statusText = Drawing.new("Text")
 statusText.Visible = true
-statusText.Text = "OFFLINE"
+statusText.Text = "STATUS: IDLE"
 statusText.Color = Color3.fromRGB(255, 100, 100)
-statusText.Size = 12
-statusText.Position = Vector2.new(250, 20)
+statusText.Size = 14
+statusText.Center = true
+statusText.Position = Vector2.new(centerX + 20, 95)
 
-local line1 = Drawing.new("Line")
-line1.Visible = true
-line1.From = Vector2.new(15, 55)
-line1.To = Vector2.new(325, 55)
-line1.Thickness = 1
-line1.Color = Color3.fromRGB(80, 80, 100)
+local sep1 = Drawing.new("Text")
+sep1.Visible = true
+sep1.Text = "─────────────────────────────────────────────"
+sep1.Color = Color3.fromRGB(80, 80, 100)
+sep1.Size = 12
+sep1.Center = true
+sep1.Position = Vector2.new(centerX, 120)
 
-local invHeader = Drawing.new("Text")
-invHeader.Visible = true
-invHeader.Text = "📦 INVENTORY"
-invHeader.Color = Color3.fromRGB(200, 200, 255)
-invHeader.Size = 12
-invHeader.Position = Vector2.new(18, 65)
+-- INVENTORY SECTION
+local invTitle = Drawing.new("Text")
+invTitle.Visible = true
+invTitle.Text = "📦 INVENTORY (CURRENT)"
+invTitle.Color = Color3.fromRGB(200, 200, 255)
+invTitle.Size = 13
+invTitle.Center = true
+invTitle.Position = Vector2.new(centerX, 145)
 
-local invT1 = Drawing.new("Text")
-invT1.Visible = true
-invT1.Text = "T1: 0"
-invT1.Color = Color3.fromRGB(255, 255, 255)
-invT1.Size = 13
-invT1.Position = Vector2.new(20, 85)
+local invText = Drawing.new("Text")
+invText.Visible = true
+invText.Text = "T1:0  T2:0  T3:0  T4:0  T5:0"
+invText.Color = Color3.fromRGB(255, 255, 255)
+invText.Size = 13
+invText.Center = true
+invText.Position = Vector2.new(centerX, 170)
 
-local invT2 = Drawing.new("Text")
-invT2.Visible = true
-invT2.Text = "T2: 0"
-invT2.Color = Color3.fromRGB(255, 255, 255)
-invT2.Size = 13
-invT2.Position = Vector2.new(90, 85)
+-- NEEDED SECTION
+local neededTitle = Drawing.new("Text")
+neededTitle.Visible = true
+neededTitle.Text = "📋 POTIONS NEEDED"
+neededTitle.Color = Color3.fromRGB(255, 200, 100)
+neededTitle.Size = 13
+neededTitle.Center = true
+neededTitle.Position = Vector2.new(centerX, 200)
 
-local invT3 = Drawing.new("Text")
-invT3.Visible = true
-invT3.Text = "T3: 0"
-invT3.Color = Color3.fromRGB(255, 255, 255)
-invT3.Size = 13
-invT3.Position = Vector2.new(160, 85)
+local neededText = Drawing.new("Text")
+neededText.Visible = true
+neededText.Text = "T1:0  T2:0  T3:0  T4:0"
+neededText.Color = Color3.fromRGB(255, 200, 100)
+neededText.Size = 13
+neededText.Center = true
+neededText.Position = Vector2.new(centerX, 225)
 
-local invT4 = Drawing.new("Text")
-invT4.Visible = true
-invT4.Text = "T4: 0"
-invT4.Color = Color3.fromRGB(255, 255, 255)
-invT4.Size = 13
-invT4.Position = Vector2.new(230, 85)
+-- TOTAL GEMS NEEDED SECTION (NEW!)
+local gemsNeededTitle = Drawing.new("Text")
+gemsNeededTitle.Visible = true
+gemsNeededTitle.Text = "💰 TOTAL GEMS NEEDED"
+gemsNeededTitle.Color = Color3.fromRGB(100, 200, 255)
+gemsNeededTitle.Size = 13
+gemsNeededTitle.Center = true
+gemsNeededTitle.Position = Vector2.new(centerX, 255)
 
-local invT5 = Drawing.new("Text")
-invT5.Visible = true
-invT5.Text = "T5: 0"
-invT5.Color = Color3.fromRGB(255, 200, 100)
-invT5.Size = 13
-invT5.Position = Vector2.new(300, 85)
+local gemsNeededText = Drawing.new("Text")
+gemsNeededText.Visible = true
+gemsNeededText.Text = "0"
+gemsNeededText.Color = Color3.fromRGB(255, 200, 100)
+gemsNeededText.Size = 14
+gemsNeededText.Center = true
+gemsNeededText.Position = Vector2.new(centerX, 280)
 
--- Brewing Queue Header
-local brewHeader = Drawing.new("Text")
-brewHeader.Visible = true
-brewHeader.Text = "🧪 BREWING QUEUE"
-brewHeader.Color = Color3.fromRGB(200, 200, 255)
-brewHeader.Size = 12
-brewHeader.Position = Vector2.new(18, 115)
+local sep2 = Drawing.new("Text")
+sep2.Visible = true
+sep2.Text = "─────────────────────────────────────────────"
+sep2.Color = Color3.fromRGB(80, 80, 100)
+sep2.Size = 12
+sep2.Center = true
+sep2.Position = Vector2.new(centerX, 310)
 
--- Slot 1
+-- BREWING QUEUE SECTION
+local brewLabel = Drawing.new("Text")
+brewLabel.Visible = true
+brewLabel.Text = "🧪 BREWING QUEUE"
+brewLabel.Color = Color3.fromRGB(200, 200, 255)
+brewLabel.Size = 13
+brewLabel.Center = true
+brewLabel.Position = Vector2.new(centerX, 335)
+
 local slot1Text = Drawing.new("Text")
 slot1Text.Visible = true
 slot1Text.Text = "Slot 1: Empty"
 slot1Text.Color = Color3.fromRGB(150, 150, 150)
 slot1Text.Size = 12
-slot1Text.Position = Vector2.new(20, 135)
+slot1Text.Center = true
+slot1Text.Position = Vector2.new(centerX, 360)
 
--- Slot 2
 local slot2Text = Drawing.new("Text")
 slot2Text.Visible = true
 slot2Text.Text = "Slot 2: Empty"
 slot2Text.Color = Color3.fromRGB(150, 150, 150)
 slot2Text.Size = 12
-slot2Text.Position = Vector2.new(20, 155)
+slot2Text.Center = true
+slot2Text.Position = Vector2.new(centerX, 385)
 
--- Slot 3
 local slot3Text = Drawing.new("Text")
 slot3Text.Visible = true
 slot3Text.Text = "Slot 3: Empty"
 slot3Text.Color = Color3.fromRGB(150, 150, 150)
 slot3Text.Size = 12
-slot3Text.Position = Vector2.new(20, 175)
+slot3Text.Center = true
+slot3Text.Position = Vector2.new(centerX, 410)
 
-local line2 = Drawing.new("Line")
-line2.Visible = true
-line2.From = Vector2.new(15, 195)
-line2.To = Vector2.new(325, 195)
-line2.Thickness = 1
-line2.Color = Color3.fromRGB(80, 80, 100)
+local sep3 = Drawing.new("Text")
+sep3.Visible = true
+sep3.Text = "─────────────────────────────────────────────"
+sep3.Color = Color3.fromRGB(80, 80, 100)
+sep3.Size = 12
+sep3.Center = true
+sep3.Position = Vector2.new(centerX, 440)
 
-local statusHeader = Drawing.new("Text")
-statusHeader.Visible = true
-statusHeader.Text = "🔧 CURRENT STATUS"
-statusHeader.Color = Color3.fromRGB(200, 200, 255)
-statusHeader.Size = 12
-statusHeader.Position = Vector2.new(18, 205)
-
-local actionText = Drawing.new("Text")
-actionText.Visible = true
-actionText.Text = "Action: Idle"
-actionText.Color = Color3.fromRGB(255, 255, 255)
-actionText.Size = 13
-actionText.Position = Vector2.new(20, 225)
-
-local tierText = Drawing.new("Text")
-tierText.Visible = true
-tierText.Text = "Crafting: --"
-tierText.Color = Color3.fromRGB(200, 200, 200)
-tierText.Size = 13
-tierText.Position = Vector2.new(20, 245)
-
-local progressText = Drawing.new("Text")
-progressText.Visible = true
-progressText.Text = "Progress: 0%"
-progressText.Color = Color3.fromRGB(100, 200, 100)
-progressText.Size = 13
-progressText.Position = Vector2.new(20, 265)
-
-local t5CountText = Drawing.new("Text")
-t5CountText.Visible = true
-t5CountText.Text = "🎯 T5 Crafted: 0"
-t5CountText.Color = Color3.fromRGB(255, 200, 100)
-t5CountText.Size = 14
-t5CountText.Position = Vector2.new(20, 290)
-
+-- STATS SECTION
 local gemsText = Drawing.new("Text")
 gemsText.Visible = true
-gemsText.Text = "💎 Gems: 0"
+gemsText.Text = "💎 GEMS: 0"
 gemsText.Color = Color3.fromRGB(100, 255, 100)
-gemsText.Size = 13
-gemsText.Position = Vector2.new(20, 315)
+gemsText.Size = 14
+gemsText.Center = true
+gemsText.Position = Vector2.new(centerX, 470)
 
-local line3 = Drawing.new("Line")
-line3.Visible = true
-line3.From = Vector2.new(15, 345)
-line3.To = Vector2.new(325, 345)
-line3.Thickness = 1
-line3.Color = Color3.fromRGB(80, 80, 100)
+local craftedText = Drawing.new("Text")
+craftedText.Visible = true
+craftedText.Text = "🎯 T5 CRAFTED: 0"
+craftedText.Color = Color3.fromRGB(255, 200, 100)
+craftedText.Size = 14
+craftedText.Center = true
+craftedText.Position = Vector2.new(centerX, 500)
 
-local footerText = Drawing.new("Text")
-footerText.Visible = true
-footerText.Text = "Shiroo Store | Auto Crafter v3.0"
-footerText.Color = Color3.fromRGB(150, 150, 150)
-footerText.Size = 10
-footerText.Position = Vector2.new(18, 360)
+local footer = Drawing.new("Text")
+footer.Visible = true
+footer.Text = "Shiroo Store | Auto Crafter v5.2"
+footer.Color = Color3.fromRGB(150, 150, 150)
+footer.Size = 10
+footer.Center = true
+footer.Position = Vector2.new(centerX, 540)
 
--- GUI update function (with brewing queue display)
+-- ============================================
+-- GUI UPDATE
+-- ============================================
+
 local function updateGUI()
     local counts = getPotionCounts()
-    local gems = getGems()
+    local missing = calculateMissing(TARGET_T5)
+    local totalGemsNeeded = calculateTotalGemsNeeded()
     local now = os.time()
     
-    invT1.Text = string.format("T1: %d", counts.T1)
-    invT2.Text = string.format("T2: %d", counts.T2)
-    invT3.Text = string.format("T3: %d", counts.T3)
-    invT4.Text = string.format("T4: %d", counts.T4)
-    invT5.Text = string.format("T5: %d", counts.T5)
-    gemsText.Text = string.format("💎 Gems: %d", gems)
-    t5CountText.Text = string.format("🎯 T5 Crafted: %d", totalT5Crafted)
-    usernameText.Text = string.format("👤 Account: %s", game.Players.LocalPlayer.Name)
+    -- Update inventory
+    invText.Text = string.format("T1:%d  T2:%d  T3:%d  T4:%d  T5:%d", counts.T1, counts.T2, counts.T3, counts.T4, counts.T5)
     
-    -- Update brewing queue display
-    local slot1Brew = activeBrews.slot1
-    local slot2Brew = activeBrews.slot2
-    local slot3Brew = activeBrews.slot3
+    -- Update needed display
+    neededText.Text = string.format("T1:%d  T2:%d  T3:%d  T4:%d", missing.T1, missing.T2, missing.T3, missing.T4)
     
-    if slot1Brew and slot1Brew.endTime then
-        local remaining = slot1Brew.endTime - now
-        if remaining > 0 then
-            slot1Text.Text = string.format("Slot 1: %s - %s left", slot1Brew.tier, formatTime(remaining))
-            slot1Text.Color = Color3.fromRGB(255, 200, 100)
-        else
-            slot1Text.Text = "Slot 1: Empty"
-            slot1Text.Color = Color3.fromRGB(150, 150, 150)
-            activeBrews.slot1 = nil
-        end
+    -- Update total gems needed
+    gemsNeededText.Text = formatNumber(totalGemsNeeded)
+    if totalGemsNeeded > getGems() then
+        gemsNeededText.Color = Color3.fromRGB(255, 100, 100)  -- Red if not enough
     else
-        slot1Text.Text = "Slot 1: Empty"
-        slot1Text.Color = Color3.fromRGB(150, 150, 150)
+        gemsNeededText.Color = Color3.fromRGB(100, 255, 100)  -- Green if enough
     end
     
-    if slot2Brew and slot2Brew.endTime then
-        local remaining = slot2Brew.endTime - now
-        if remaining > 0 then
-            slot2Text.Text = string.format("Slot 2: %s - %s left", slot2Brew.tier, formatTime(remaining))
-            slot2Text.Color = Color3.fromRGB(255, 200, 100)
-        else
-            slot2Text.Text = "Slot 2: Empty"
-            slot2Text.Color = Color3.fromRGB(150, 150, 150)
-            activeBrews.slot2 = nil
-        end
-    else
-        slot2Text.Text = "Slot 2: Empty"
-        slot2Text.Color = Color3.fromRGB(150, 150, 150)
-    end
+    -- Update stats
+    gemsText.Text = "💎 GEMS: " .. formatNumber(getGems())
+    craftedText.Text = "🎯 T5 CRAFTED: " .. totalT5Crafted
     
-    if slot3Brew and slot3Brew.endTime then
-        local remaining = slot3Brew.endTime - now
-        if remaining > 0 then
-            slot3Text.Text = string.format("Slot 3: %s - %s left", slot3Brew.tier, formatTime(remaining))
-            slot3Text.Color = Color3.fromRGB(255, 200, 100)
-        else
-            slot3Text.Text = "Slot 3: Empty"
-            slot3Text.Color = Color3.fromRGB(150, 150, 150)
-            activeBrews.slot3 = nil
-        end
-    else
-        slot3Text.Text = "Slot 3: Empty"
-        slot3Text.Color = Color3.fromRGB(150, 150, 150)
-    end
-    
-    if _G.AutoBrew then
+    -- Update status
+    if running then
         statusDot.Color = Color3.fromRGB(0, 255, 0)
-        statusText.Text = "ACTIVE"
+        statusText.Text = "STATUS: ACTIVE"
         statusText.Color = Color3.fromRGB(100, 255, 100)
-        actionText.Text = "Action: Crafting"
-        actionText.Color = Color3.fromRGB(100, 255, 100)
     else
         statusDot.Color = Color3.fromRGB(255, 0, 0)
-        statusText.Text = "IDLE"
+        statusText.Text = "STATUS: IDLE"
         statusText.Color = Color3.fromRGB(255, 100, 100)
-        actionText.Text = "Action: Idle"
-        actionText.Color = Color3.fromRGB(255, 255, 255)
     end
     
-    if currentCraftingTier ~= "Idle" then
-        tierText.Text = string.format("Crafting: %s", currentCraftingTier)
-        tierText.Color = Color3.fromRGB(255, 200, 100)
-    else
-        tierText.Text = "Crafting: --"
-        tierText.Color = Color3.fromRGB(200, 200, 200)
+    -- Update brewing slots
+    local slots = { slot1Text, slot2Text, slot3Text }
+    for i = 1, 3 do
+        local brew = activeBrews[i]
+        if brew and brew.endTime then
+            local remaining = brew.endTime - now
+            if remaining > 0 then
+                slots[i].Text = string.format("Slot %d: %s (%s)", i, brew.tier, formatTime(remaining))
+                slots[i].Color = Color3.fromRGB(255, 200, 100)
+            else
+                slots[i].Text = string.format("Slot %d: Empty", i)
+                slots[i].Color = Color3.fromRGB(150, 150, 150)
+            end
+        else
+            slots[i].Text = string.format("Slot %d: Empty", i)
+            slots[i].Color = Color3.fromRGB(150, 150, 150)
+        end
+    end
+    
+    -- Update positions on resize
+    local newCenterX, _ = getCenter()
+    if math.abs(newCenterX - centerX) > 1 then
+        centerX = newCenterX
+        guiBg.Position = Vector2.new(centerX - 220, 30)
+        title.Position = Vector2.new(centerX, 60)
+        statusDot.Position = Vector2.new(centerX - 50, 95)
+        statusText.Position = Vector2.new(centerX + 20, 95)
+        sep1.Position = Vector2.new(centerX, 120)
+        invTitle.Position = Vector2.new(centerX, 145)
+        invText.Position = Vector2.new(centerX, 170)
+        neededTitle.Position = Vector2.new(centerX, 200)
+        neededText.Position = Vector2.new(centerX, 225)
+        gemsNeededTitle.Position = Vector2.new(centerX, 255)
+        gemsNeededText.Position = Vector2.new(centerX, 280)
+        sep2.Position = Vector2.new(centerX, 310)
+        brewLabel.Position = Vector2.new(centerX, 335)
+        slot1Text.Position = Vector2.new(centerX, 360)
+        slot2Text.Position = Vector2.new(centerX, 385)
+        slot3Text.Position = Vector2.new(centerX, 410)
+        sep3.Position = Vector2.new(centerX, 440)
+        gemsText.Position = Vector2.new(centerX, 470)
+        craftedText.Position = Vector2.new(centerX, 500)
+        footer.Position = Vector2.new(centerX, 540)
     end
 end
 
--- Start GUI update loop (every second for real-time countdown)
 spawn(function()
     while true do
-        task.wait(1)
-        pcall(function() updateGUI() end)
+        task.wait(0.5)
+        pcall(updateGUI)
     end
 end)
-
--- ============================================
--- ANTI AFK
--- ============================================
-
-if ANTI_AFK_ENABLED then
-    local VirtualUser = game:GetService("VirtualUser")
-    local Players = game:GetService("Players")
-    local LocalPlayer = Players.LocalPlayer
-    
-    spawn(function()
-        while true do
-            wait(60)
-            pcall(function()
-                VirtualUser:CaptureController()
-                VirtualUser:ClickButton2(Vector2.new())
-                LocalPlayer.Idled:Connect(function()
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new())
-                end)
-            end)
-        end
-    end)
-    print("[Anti-AFK] Enabled")
-end
-
--- ============================================
--- CRAFTING FUNCTIONS
--- ============================================
-
-local function craftTier(craftPotion, tier, amountNeeded, label)
-    local crafted = 0
-    local tierName = TIERS[tier].name
-    local craftTime = TIERS[tier].time
-    
-    if amountNeeded <= 0 then
-        return true
-    end
-    
-    currentCraftingTier = label
-    pcall(function() updateGUI() end)
-    progressText.Text = string.format("Progress: 0%% (0/%d)", amountNeeded)
-    
-    while crafted < amountNeeded and _G.AutoBrew do
-        local slotsToUse = math.min(CRAFTING_SLOTS, amountNeeded - crafted)
-        
-        for i = 1, slotsToUse do
-            pcall(function()
-                craftPotion:InvokeServer(tierName)
-            end)
-            task.wait(0.3)
-        end
-        
-        task.wait(craftTime + 2)
-        crafted = crafted + slotsToUse
-        
-        local percent = math.floor((crafted / amountNeeded) * 100)
-        progressText.Text = string.format("Progress: %d%% (%d/%d)", percent, crafted, amountNeeded)
-        pcall(function() updateGUI() end)
-    end
-    
-    return true
-end
-
--- Main batch function
-local function craftBatch()
-    local craftPotion = getCraftPotion()
-    if not craftPotion then
-        progressText.Text = "Error: Remote not found!"
-        return false
-    end
-    
-    local gems = getGems()
-    local batchSize = math.min(BATCH_SIZE, math.floor(gems / 250))
-    
-    if batchSize == 0 then
-        progressText.Text = "Out of gems!"
-        return false
-    end
-    
-    local missing = calculateMissingBackwards(batchSize)
-    local current = getPotionCounts()
-    
-    if current.T5 >= batchSize then
-        return true
-    end
-    
-    -- Craft in correct order: T1 → T2 → T3 → T4 → T5
-    if missing.T1 > 0 then
-        if not craftTier(craftPotion, 1, missing.T1, "T1") then return false end
-    end
-    
-    local newMissing = calculateMissingBackwards(batchSize)
-    
-    if newMissing.T2 > 0 then
-        if not craftTier(craftPotion, 2, newMissing.T2, "T2") then return false end
-    end
-    
-    newMissing = calculateMissingBackwards(batchSize)
-    
-    if newMissing.T3 > 0 then
-        if not craftTier(craftPotion, 3, newMissing.T3, "T3") then return false end
-    end
-    
-    newMissing = calculateMissingBackwards(batchSize)
-    
-    if newMissing.T4 > 0 then
-        if not craftTier(craftPotion, 4, newMissing.T4, "T4") then return false end
-    end
-    
-    currentCraftingTier = "T5"
-    pcall(function() updateGUI() end)
-    progressText.Text = string.format("Progress: 0%% (0/%d)", batchSize)
-    
-    local t5Crafted = 0
-    while t5Crafted < batchSize and _G.AutoBrew do
-        local slotsToUse = math.min(CRAFTING_SLOTS, batchSize - t5Crafted)
-        
-        for i = 1, slotsToUse do
-            pcall(function()
-                craftPotion:InvokeServer(TIERS[5].name)
-            end)
-            task.wait(0.3)
-        end
-        
-        task.wait(TIERS[5].time + 2)
-        t5Crafted = t5Crafted + slotsToUse
-        totalT5Crafted = totalT5Crafted + slotsToUse
-        
-        -- Send webhook for each T5 crafted
-        sendWebhook(totalT5Crafted)
-        
-        local percent = math.floor((t5Crafted / batchSize) * 100)
-        progressText.Text = string.format("Progress: %d%% (%d/%d)", percent, t5Crafted, batchSize)
-        pcall(function() updateGUI() end)
-    end
-    
-    progressText.Text = "Batch complete!"
-    return true
-end
 
 -- ============================================
 -- MAIN LOOP
 -- ============================================
 
 local function start()
-    if _G.AutoBrew then return end
-    _G.AutoBrew = true
-    pcall(function() updateGUI() end)
+    if running then return end
+    running = true
+    refreshQueue()
+    print("[Started] Auto Crafter v5.2")
     
-    while _G.AutoBrew do
-        local success = craftBatch()
-        if not success then
-            _G.AutoBrew = false
-            break
-        end
-        task.wait(10)
+    for i = 1, 3 do
+        brewNext()
+        task.wait(0.3)
     end
-    
-    currentCraftingTier = "Idle"
-    pcall(function() updateGUI() end)
 end
 
 local function stop()
-    _G.AutoBrew = false
-    currentCraftingTier = "Idle"
-    progressText.Text = "Progress: Stopped"
-    pcall(function() updateGUI() end)
+    running = false
     print("[Stopped] Auto Crafter")
 end
 
+_G.start = start
+_G.stop = stop
+
+-- ============================================
 -- AUTO START
+-- ============================================
+
 task.wait(2)
-local gems = getGems()
-if gems >= 250 then
-    print("[Auto Start] Beginning crafting...")
+if getGems() >= 250 then
     start()
 else
-    print(string.format("[Auto Start] Waiting for gems... Need 250, have %d", gems))
+    print("Not enough gems:", getGems())
 end
 
-pcall(function() updateGUI() end)
-
-print("\n=== Auto Crafter v3.0 Loaded ===")
-print("Account: " .. game.Players.LocalPlayer.Name)
-print("✅ Brewing Queue Timer Active - Shows real-time countdown")
-print("Type stop() to stop, start() to resume")
-print("Current gems: " .. getGems())
+print("=== Auto Crafter v5.2 Loaded ===")
